@@ -1,4 +1,5 @@
 import logging
+import re
 from collections import Counter
 from typing import List, Tuple, Dict
 
@@ -71,16 +72,32 @@ def getErrorRate(train_data, test_data, MLETagger, default_tag='NN'):
 
     return (accuracyTotal, accuracyKnown, accuracyUnknown)
 
+def simplifyTags(tagged_sentences: List[List[Tuple]]) -> List[List[Tuple]]:
+    """
+    Strip '-' and '+' signs (and whatever comes afterwards ) from the tags.
+    For example:
+        NN-TL   --> NN
+        NR-HL   --> NR
+        NP+BEZ  --> NP
+    Return the same sentences list with simplified tags.
+    :param tagged_sentences: list of sentences [[(word, tag), ...], ...]
+    :return: same sentences list with simplified tags
+    """
+    simplify = lambda tag: re.split('[\+,\-]', tag)[0]
+    return [[(word, simplify(tag)) for (word, tag) in sentence]
+            for sentence in tagged_sentences]
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
 
     # http://www.nltk.org/book/ch05.html
     brown_tagged_sents = brown.tagged_sents(categories='news')
+    brown_simplified_tagged_sents = simplifyTags(brown_tagged_sents)
     brown_sents = brown.sents(categories='news')
-    size = int(len(brown_tagged_sents) * 0.9)
-    train_sents = brown_tagged_sents[:size]
-    test_sents = brown_tagged_sents[size:]
+    size = int(len(brown_simplified_tagged_sents) * 0.9)
+    train_sents = brown_simplified_tagged_sents[:size]
+    test_sents = brown_simplified_tagged_sents[size:]
 
     word_probabilities = MLETagger(train_sents)
     logging.info(word_probabilities)
