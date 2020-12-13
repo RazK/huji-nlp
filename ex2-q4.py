@@ -264,12 +264,14 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
     #           word_tag_counts[x][y]
     #  e(x|y) = ---------------------
     #               tag_counts[y]
+    total_counts = sum(tag_counts.values())
     for sentence in padded_tagged_sentences:
+
         for (word, tag) in sentence[1:]:  # skip 'start' tag
             if add_one_smoothing:
                 emissions[(tag, word)] = \
                     (word_tag_counts[word][tag] + 1) / \
-                    (tag_counts[tag] + len(tag_counts))
+                    (total_counts + len(tag_counts))
             else:
                 emissions[(tag, word)] = \
                     word_tag_counts[word][tag] / \
