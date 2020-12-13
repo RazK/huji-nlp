@@ -58,6 +58,47 @@ def getErrorRate(train_data, test_data, MLETagger, default_tag='NN'):
     return (accuracyTotal, accuracyKnown, accuracyUnknown)
 
 
+def getErrorRateBigram(train_data, test_data, train_predictions, default_tag='NN'):
+    """
+    Calculate the error rate (1-accuracy) of the MLE Tagger.
+    :param train_data: list of tagged sentences [[(word, tag), ...], ...]
+    :param test_data:  list of tagged sentences [[(word, tag), ...], ...]
+    :param MLETagger:  function(tagged_sentences) -->
+    :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
+    """
+
+    train_mle = MLE_tagger(train_data)
+    totalWords = {'known': 0,
+                  'unknown': 0}
+    correctWords = {'known': 0,
+                    'unknown': 0}
+
+    flatTestData = [(word, tag) for sentence in test_data
+                    for (word, tag) in sentence]
+
+    # Go over all test data and count correct predictions
+    for i, (word, tag) in enumerate(flatTestData):
+        # Known words
+        if word in train_mle:
+            type = 'known'
+
+        # Unknown words
+        else:
+            type = 'unknown'
+
+        totalWords[type] += 1
+        if tag == train_predictions[i][1]:
+            correctWords[type] += 1
+
+    accuracyKnown = correctWords['known'] / totalWords['known']
+    accuracyUnknown = correctWords['unknown'] / totalWords['unknown']
+    accuracyTotal = \
+        (correctWords['known'] + correctWords['unknown']) / len(flatTestData)
+
+    return (accuracyTotal, accuracyKnown, accuracyUnknown)
+
+
+
 def MLE_tagger(tagged_sentences: List[List[Tuple]]) -> Dict:
     """
     Compute the Maximum Likelihood Estimation for each word.
@@ -73,12 +114,12 @@ def MLE_tagger(tagged_sentences: List[List[Tuple]]) -> Dict:
                 word_tag_counts[word] = Counter()
             word_counts[word] += 1
             word_tag_counts[word][tag] += 1
-    logging.debug(word_counts)
-    logging.debug(word_tag_counts)
+    #logging.debug(word_counts)
+    #logging.debug(word_tag_counts)
 
     mle_tag = lambda word: word_tag_counts[word].most_common(1)[0][0]
     word_tag_mle = {word: mle_tag(word) for word in word_tag_counts}
-    logging.debug(word_tag_mle)
+    #logging.debug(word_tag_mle)
 
     return word_tag_mle
 
@@ -236,7 +277,6 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
 
     emissions[(end_tag, end_word)] = 1
 
-
     #              bigrams[(y-1, y)]
     #  q(y|y-1) =  -----------------
     #               unigrams[(y-1)]
@@ -271,7 +311,7 @@ def bigram_viterbi(untagged_sentence,
     :return: tagged_sentence List[(x1, y1), (x2, y2), ...]
     """
     # tags = {tag for (tag, word) in emissions}
-    logging.info(untagged_sentence)
+    #logging.info(untagged_sentence)
     padded_sentence = [start_word, ] + untagged_sentence + [end_word, ]
     padded_tags = tags | {start_tag, end_tag}
     v = {i: {tag: 0 for tag in padded_tags} for i in range(len(padded_sentence))}
@@ -299,7 +339,7 @@ def bigram_viterbi(untagged_sentence,
                 transit = ((prev_tag,), (cur_tag,))
                 emit = (cur_tag, word)
                 if transit not in transitions:
-                    transition = 0
+                    transition = 1/(10**30)  # TODO  RK - explain why
                 else:
                     transition = transitions[transit]
                     has_transitions = True
@@ -382,9 +422,9 @@ def bigram_viterbi(untagged_sentence,
     best_tag = bp[i][END_TAG]
     while best_tag != start_tag:  # while i >= 0:
         i -= 1
-        logging.debug("{} {} {}".format(i,
-                                        padded_sentence[i-1],
-                                        bp[i][best_tag]))
+        #logging.debug("{} {} {}".format(i,
+         #                               padded_sentence[i-1],
+         #                               bp[i][best_tag]))
 
         best_path.append(best_tag)
         best_tag = bp[i][best_tag]
@@ -509,7 +549,7 @@ def simplifyTags(tagged_sentences: List[List[Tuple]]) -> List[List[Tuple]]:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, filename='smoothing.txt')
+    logging.basicConfig(level=logging.DEBUG)
 
     # http://www.nltk.org/book/ch05.html
     brown_tagged_sents = brown.tagged_sents(categories='news')
@@ -526,8 +566,8 @@ if __name__ == '__main__':
     # word_probabilities = MLETagger(train_sents)
     # logging.info(word_probabilities)
 
-    # accuracies = getErrorRate(train_sents, test_sents, MLETagger)
-    # logging.info(accuracies)
+    accuracies = getErrorRate(train_sents, test_sents, MLE_tagger)
+    logging.info(accuracies)
 
     #train_sents = [['A', 'C', 'C', 'G', 'T', 'G', 'C', 'A']]
     #train_emissions = EMISSIONS_BIGRAM
@@ -535,6 +575,8 @@ if __name__ == '__main__':
     # train_sents = [['meow', 'woof'],]
     # train_emissions = EMISSIONS_DOGCAT
     # train_transitions = TRANSITIONS_DOGCAT
+    #logging.info('Emissions: {}'.format(train_emissions))
+    #logging.info('Transitions: {}'.format(train_transitions))
     train_emissions, train_transitions = bigram_HMM(train_sents, False)
     logging.info('Emissions: {}'.format(train_emissions))
     logging.info('Transitions: {}'.format(train_transitions))
@@ -542,8 +584,17 @@ if __name__ == '__main__':
     logging.info('Emissions: {}'.format(train_emissions))
     logging.info('Transitions: {}'.format(train_transitions))
 
-    # for untagged_sentence in test_sents_untagged:
-    #     logging.info(bigram_viterbi(untagged_sentence,
-    #                          train_emissions,
-    #                          train_transitions,
-    #                          tags=simplified_tags))
+    predictions = []
+    for untagged_sentence in test_sents_untagged:
+        new_lst =  bigram_viterbi(untagged_sentence,
+                             train_emissions,
+                             train_transitions,
+                             tags=simplified_tags)
+
+        #logging.info(new_lst)
+        predictions = predictions + new_lst
+
+
+
+    accuracies = getErrorRateBigram(train_sents, test_sents, predictions)
+    logging.info(accuracies)
