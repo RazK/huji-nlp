@@ -155,6 +155,7 @@ def KgramMLETagger(tagged_sentences: List[List[Tuple]], k=2,
 
 
 def bigram_HMM(tagged_sentences: List[List[Tuple]],
+               add_one_smoothing:bool = True,
                start_tag='START_TAG',
                end_tag='END_TAG',
                start_word='START_WORD',
@@ -224,9 +225,17 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
     #               tag_counts[y]
     for sentence in padded_tagged_sentences:
         for (word, tag) in sentence[1:]:  # skip 'start' tag
-            emissions[(tag, word)] = \
-                word_tag_counts[word][tag] / tag_counts[tag]
+            if add_one_smoothing:
+                emissions[(tag, word)] = \
+                    (word_tag_counts[word][tag] + 1) / \
+                    (tag_counts[tag] + len(tag_counts))
+            else:
+                emissions[(tag, word)] = \
+                    word_tag_counts[word][tag] / \
+                    tag_counts[tag]
+
     emissions[(end_tag, end_word)] = 1
+
 
     #              bigrams[(y-1, y)]
     #  q(y|y-1) =  -----------------
@@ -282,7 +291,7 @@ def bigram_viterbi(untagged_sentence,
     for i in range(1, len(padded_sentence)):
         word = padded_sentence[i]
         has_emissions = False
-                
+
         for prev_tag in padded_tags:
             has_emissions = False
             has_transitions = False
@@ -500,7 +509,7 @@ def simplifyTags(tagged_sentences: List[List[Tuple]]) -> List[List[Tuple]]:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG, filename='smoothing.txt')
 
     # http://www.nltk.org/book/ch05.html
     brown_tagged_sents = brown.tagged_sents(categories='news')
@@ -520,18 +529,21 @@ if __name__ == '__main__':
     # accuracies = getErrorRate(train_sents, test_sents, MLETagger)
     # logging.info(accuracies)
 
-    train_emissions, train_transitions = bigram_HMM(train_sents)
     #train_sents = [['A', 'C', 'C', 'G', 'T', 'G', 'C', 'A']]
     #train_emissions = EMISSIONS_BIGRAM
     #train_transitions = TRANSITIONS_BIGRAM
     # train_sents = [['meow', 'woof'],]
     # train_emissions = EMISSIONS_DOGCAT
     # train_transitions = TRANSITIONS_DOGCAT
+    train_emissions, train_transitions = bigram_HMM(train_sents, False)
+    logging.info('Emissions: {}'.format(train_emissions))
+    logging.info('Transitions: {}'.format(train_transitions))
+    train_emissions, train_transitions = bigram_HMM(train_sents, True)
     logging.info('Emissions: {}'.format(train_emissions))
     logging.info('Transitions: {}'.format(train_transitions))
 
-    for untagged_sentence in test_sents_untagged:
-        logging.info(bigram_viterbi(untagged_sentence,
-                             train_emissions,
-                             train_transitions,
-                             tags=simplified_tags))
+    # for untagged_sentence in test_sents_untagged:
+    #     logging.info(bigram_viterbi(untagged_sentence,
+    #                          train_emissions,
+    #                          train_transitions,
+    #                          tags=simplified_tags))
