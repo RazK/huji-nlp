@@ -1,19 +1,29 @@
 import logging
 import re
 from collections import Counter
-from itertools import product
-from typing import List, Tuple, Dict, Any
-
-import numpy as np
+from copy import deepcopy
+from typing import List, Tuple, Dict
 from nltk.corpus import brown
-
-from viterbi import EMISSIONS_BIGRAM, TRANSITIONS_BIGRAM, EMISSIONS_DOGCAT, \
-    TRANSITIONS_DOGCAT
 
 START_TAG = 'START_TAG'
 END_TAG = 'END_TAG'
 START_WORD = 'START_WORD'
 END_WORD = 'END_WORD'
+
+PSEUDO_REGEX = \
+    {'_MONEY': '.*\$.*',  # https://regex101.com/r/UoFL0T/1
+     '_NUMBER': '\d+',  # https://regex101.com/r/kzCwuJ/2
+     '_NUMBERED': '\d+(st|nd|rd|th)',  # https://regex101.com/r/0rLKtF/1
+     '_FUL': '.*ful',
+     '_EST': '.*est',
+     '_ER': '.*er',
+     '_TION': '.*tion',
+     '_%': '.*%.*',
+     '_.': '.*\..*',  # https://regex101.com/r/Q8H1v1/1
+     '_-': '.*-.*'  # https://regex101.com/r/Q8H1v1/2
+     }
+PSEUDO_REGEX_COMPILED = {tag: re.compile(PSEUDO_REGEX[tag]) for tag in
+                         PSEUDO_REGEX}
 
 
 def getErrorRate(train_data, test_data, MLETagger, default_tag='NN'):
@@ -58,7 +68,8 @@ def getErrorRate(train_data, test_data, MLETagger, default_tag='NN'):
     return (accuracyTotal, accuracyKnown, accuracyUnknown)
 
 
-def getErrorRateBigram(train_data, test_data, train_predictions, default_tag='NN'):
+def getErrorRateBigram(train_data, test_data, train_predictions,
+                       default_tag='NN'):
     """
     Calculate the error rate (1-accuracy) of the MLE Tagger.
     :param train_data: list of tagged sentences [[(word, tag), ...], ...]
@@ -66,7 +77,6 @@ def getErrorRateBigram(train_data, test_data, train_predictions, default_tag='NN
     :param MLETagger:  function(tagged_sentences) -->
     :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
     """
-
     train_mle = MLE_tagger(train_data)
     totalWords = {'known': 0,
                   'unknown': 0}
@@ -98,7 +108,6 @@ def getErrorRateBigram(train_data, test_data, train_predictions, default_tag='NN
     return (accuracyTotal, accuracyKnown, accuracyUnknown)
 
 
-
 def MLE_tagger(tagged_sentences: List[List[Tuple]]) -> Dict:
     """
     Compute the Maximum Likelihood Estimation for each word.
@@ -109,108 +118,26 @@ def MLE_tagger(tagged_sentences: List[List[Tuple]]) -> Dict:
     word_tag_counts = dict()
 
     for sentence in tagged_sentences:
-        for (word, tag) in sentence:  # pair = (word, tag)
+        for (word, tag) in sentence:
             if word not in word_tag_counts:
                 word_tag_counts[word] = Counter()
             word_counts[word] += 1
             word_tag_counts[word][tag] += 1
-    #logging.debug(word_counts)
-    #logging.debug(word_tag_counts)
 
     mle_tag = lambda word: word_tag_counts[word].most_common(1)[0][0]
     word_tag_mle = {word: mle_tag(word) for word in word_tag_counts}
-    #logging.debug(word_tag_mle)
 
     return word_tag_mle
 
 
-def KgramMLETagger(tagged_sentences: List[List[Tuple]], k=2,
-                   start_tag=START_TAG,
-                   end_tag=END_TAG) -> \
-        Tuple[Dict[Tuple[str, str], float], \
-              Dict[Tuple[Tuple, Tuple], float]]:
-    """
-    Calculate the emission and transition probabilities of the tags and
-    words in the given tagged sentences.
-    :param tagged_sentences: list of sentences [[(word, tag), ...], ...]
-    :param k: 2 for Bigram, 3 for Trigram, etc.
-    :param start_tag: A unique tag that signals the start of a sentence
-    :param end_tag: A unique tag that signals the end of a sentence
-    :return: (  emissions: {(tag, word) : probability},
-                transitions: {((yk, yk-1, ..., y2), (yk-1, ..., y2, y1)) :
-                probability} )
-    """
-    tag_counts = Counter()  # For each tag, counts the total number of words
-    # with this tag
-    k_transitions = Counter()  # Counts the number of transitions (y | y-k,
-    # y-k+1, ..., y-1)
-    k_1_transitions = Counter()  # Counts the number of transitions (y |
-    # y-k+1, ..., y-1)
-    word_tag_counts = dict()  # Counts the number of occurrences of (word,
-    # tag) in the tagged sentences
-
-    emissions = dict()  # e probabilities
-    transitions = dict()  # q probabilities
-
-    for sentence in tagged_sentences:
-        # Make sure every sentence ends with a 'stop'
-        sentence += [end_tag]
-
-        # Begin every sentence with a 'start'
-        kgram = [start_tag] * k  # [y-k, y-k+1, ..., y-2, y-1, y]
-        for (word, tag) in sentence:
-            # Accumulate the number of occurrences of each (word,tag) pair
-            if word not in word_tag_counts.keys():
-                word_tag_counts[word] = Counter()
-            word_tag_counts[word][tag] += 1
-
-            # Accumulate the number of occurrences of each tag
-            tag_counts[tag] += 1
-
-            # Accumulate k-gram and k-1-gram transitions
-            # k-gram:   [y-k, y-k+1, ..., y-2, y-1, y]
-            # k-1-gram: [y-k, y-k+1, ..., y-2, y-1]
-            k_transitions[tuple(kgram)] += 1
-            k_1_transitions[tuple(kgram[:-1])] += 1
-            kgram.pop(0)  # remove [y-k]
-            kgram.append(tag)  # add new [y]
-
-    #             word_tag_counts[x1][y1]
-    #  e(x1|y1) = -----------------------
-    #                  tag_counts[y1]
-    for sentence in tagged_sentences:
-        for (word, tag) in sentence:
-            emissions[(word, tag)] = word_tag_counts[word][tag] / tag_counts[
-                tag]
-
-    #                        k_transitions[(y-k, y-k+1, ..., y-1, y)]
-    #  q(y|y-k, ..., y-1) =  ----------------------------------------
-    #                           k_1_transitions[(y-k, ..., y-1)]
-    for k_gram in k_transitions:
-        prev_gram = k_gram[:-1]  # (y-k, y-k+1, ..., y-1)
-        cur_gram = k_gram[1:]  # (y-k+1, ..., y-1, y)
-        transitions[(prev_gram, cur_gram)] = k_transitions[k_gram] / \
-                                             k_1_transitions[prev_gram]
-
-    return emissions, transitions
-
-
 def bigram_HMM(tagged_sentences: List[List[Tuple]],
-               add_one_smoothing:bool = True,
-               start_tag='START_TAG',
-               end_tag='END_TAG',
-               start_word='START_WORD',
-               end_word='END_WORD') -> \
+               add_one_smoothing: bool = True) -> \
         Tuple[Dict[Tuple[str, str], float], \
               Dict[Tuple[Tuple, Tuple], float]]:
     """
     Calculate the emission and transition probabilities of the tags and words
     in the given tagged sentences.
     :param tagged_sentences: list of sentences [[(x, y), ...], ...]
-    :param start_word: A unique word that pads the start of a sentence
-    :param end_word: A unique word that pads the end of a sentence
-    :param start_tag: A unique tag that signals the start of a sentence
-    :param end_tag: A unique tag that signals the end of a sentence
     :return: (  emissions: {(y, x) : probability},
                 transitions: {((y-1), (y)) : probability} )
     """
@@ -235,12 +162,12 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
 
     # Wrap every sentence with 'start' and 'stop' symbols
     padded_tagged_sentences = \
-        [[(start_word, start_tag)] + sentence + [(end_word, end_tag)] for
-                                                 sentence in tagged_sentences]
+        [[(START_WORD, START_TAG)] + sentence + [(END_WORD, END_TAG)] for
+         sentence in tagged_sentences]
     for sentence in padded_tagged_sentences:
 
         # Sliding bigram window over the sentence
-        tags_bigram = [sentence[0][1],]  # start tag
+        tags_bigram = [sentence[0][1], ]  # start tag
 
         for (word, tag) in sentence[1:]:
             tags_bigram.append(tag)  # add new [y]
@@ -264,8 +191,8 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
     #           word_tag_counts[x][y]
     #  e(x|y) = ---------------------
     #               tag_counts[y]
-    tag_word_counts = {tag : {word : word_tag_counts[word][tag] for word in
-                              word_tag_counts if tag in word_tag_counts[word]}
+    tag_word_counts = {tag: {word: word_tag_counts[word][tag] for word in
+                             word_tag_counts if tag in word_tag_counts[word]}
                        for tag in tag_counts}
     for sentence in padded_tagged_sentences:
         for (word, tag) in sentence[1:]:  # skip 'start' tag
@@ -278,7 +205,7 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
                     word_tag_counts[word][tag] / \
                     tag_counts[tag]
 
-    emissions[(end_tag, end_word)] = 1
+    emissions[(END_TAG, END_WORD)] = 1
 
     #              bigrams[(y-1, y)]
     #  q(y|y-1) =  -----------------
@@ -296,10 +223,6 @@ def bigram_viterbi(untagged_sentence,
                    emissions,
                    transitions,
                    tags,
-                   start_word='START_WORD',
-                   end_word='END_WORD',
-                   start_tag='START_TAG',
-                   end_tag='END_TAG',
                    unknown_tag='NN'):
     """
     Calculate the most likely sentence tagging given the emissions and
@@ -308,18 +231,16 @@ def bigram_viterbi(untagged_sentence,
     :param emissions: {(y, x) : probability}
     :param transitions: {((y-1), (y)) : probability} )
     :param tags: set of all possible tags
-    :param start_tag: A unique character that never appears in any word,
-                      used as placeholder for starting words
     :param unknown_tag: A tag used for unknown words
     :return: tagged_sentence List[(x1, y1), (x2, y2), ...]
     """
-    # tags = {tag for (tag, word) in emissions}
-    #logging.info(untagged_sentence)
-    padded_sentence = [start_word, ] + untagged_sentence + [end_word, ]
-    padded_tags = tags | {start_tag, end_tag}
-    v = {i: {tag: 0 for tag in padded_tags} for i in range(len(padded_sentence))}
-    bp = {i: {tag: None for tag in padded_tags} for i in range(len(padded_sentence))}
-    v[0][START_TAG] = 1
+    padded_sentence = [START_WORD, ] + untagged_sentence + [END_WORD, ]
+    padded_tags = tags | {START_TAG, END_TAG}
+    viterbi = {i: {tag: 0 for tag in padded_tags} for i in
+               range(len(padded_sentence))}
+    backpointers = {i: {tag: None for tag in padded_tags} for i in
+                    range(len(padded_sentence))}
+    viterbi[0][START_TAG] = 1
 
     # Set all unknown words (no emission) to have the tag 'NN'
     for word in untagged_sentence:
@@ -333,206 +254,41 @@ def bigram_viterbi(untagged_sentence,
 
     for i in range(1, len(padded_sentence)):
         word = padded_sentence[i]
-        has_emissions = False
 
         for prev_tag in padded_tags:
-            has_emissions = False
-            has_transitions = False
             for cur_tag in padded_tags:
                 transit = ((prev_tag,), (cur_tag,))
                 emit = (cur_tag, word)
                 if transit not in transitions:
-                    transition = 1/(10**30)  # TODO  RK - explain why
+                    transition = 1 / (10 ** 30)  # TODO  RK - explain why
                 else:
                     transition = transitions[transit]
-                    has_transitions = True
 
                 if emit not in emissions:
                     emission = 0
                 else:
                     emission = emissions[emit]
-                    has_emissions = True
 
-                prev_prob = v[i - 1][prev_tag]
+                prev_prob = viterbi[i - 1][prev_tag]
                 cur_prob = prev_prob * \
                            transition * \
                            emission
 
-                if (cur_prob > v[i][cur_tag]):
-                    v[i][cur_tag] = cur_prob
-                    bp[i][cur_tag] = prev_tag
+                if (cur_prob > viterbi[i][cur_tag]):
+                    viterbi[i][cur_tag] = cur_prob
+                    backpointers[i][cur_tag] = prev_tag
 
-        #
-        # if (not has_emissions):
-        #     emission = 1
-        #     for prev_tag in padded_tags:
-        #         transit = ((prev_tag,), ('NN',))
-        #
-        #         if transit not in transitions:
-        #             transition = 0
-        #         else:
-        #             transition = transitions[transit]
-        #
-        #         prev_prob = v[i - 1][prev_tag]
-        #         cur_prob = prev_prob * \
-        #                    transition * \
-        #                    emission
-        #
-        #         if (cur_prob > v[i]['NN']):
-        #             v[i]['NN'] = cur_prob
-        #             bp[i]['NN'] = prev_tag
-        #
-        # if (not has_transitions):
-        #     transition = 1
-        #     for prev_tag in (padded_tags):
-        #         emit = ('NN', word)
-        #
-        #         if emit not in emissions:
-        #             emission = 0
-        #         else:
-        #             emission = emissions[emit]
-        #
-        #         prev_prob = v[i - 1][prev_tag]
-        #         cur_prob = prev_prob * \
-        #                    transition * \
-        #                    emission
-        #
-        #         if (cur_prob > v[i]['NN']):
-        #             v[i]['NN'] = cur_prob
-        #             bp[i]['NN'] = prev_tag
-        #
-        # if (not has_transitions) and (not has_emissions):
-        #     emission = 1
-        #     transition = 1
-        #     for prev_tag in (padded_tags):
-        #
-        #         prev_prob = v[i - 1][prev_tag]
-        #         cur_prob = prev_prob * \
-        #                    transition * \
-        #                    emission
-        #
-        #         if (cur_prob > v[i]['NN']):
-        #             v[i]['NN'] = cur_prob
-        #             bp[i]['NN'] = prev_tag
-        #
-        #
-        #
-            #logging.debug('i: {} | has_emissions: {} | has_transitions: {
-            # }'.format(i,has_emissions, has_transitions))
-
-    best_path = []
-    i = len(padded_sentence)-1
-    best_tag = bp[i][END_TAG]
-    while best_tag != start_tag:  # while i >= 0:
+    best_tag_sequence = []
+    i = len(padded_sentence) - 1
+    best_tag = backpointers[i][END_TAG]
+    while best_tag != START_TAG:  # while i >= 0:
         i -= 1
-        #logging.debug("{} {} {}".format(i,
-         #                               padded_sentence[i-1],
-         #                               bp[i][best_tag]))
+        best_tag_sequence.append(best_tag)
+        best_tag = backpointers[i][best_tag]
+    best_tag_sequence.reverse()
 
-        best_path.append(best_tag)
-        best_tag = bp[i][best_tag]
-
-    best_path.reverse()
-
-    return [(untagged_sentence[i], best_path[i])
+    return [(untagged_sentence[i], best_tag_sequence[i])
             for i in range(len(untagged_sentence))]
-
-
-def get_viterbi_tagging(untagged_sentence, emissions, transitions, tags, k=2,
-                        start_word='START_WORD',
-                        end_word='END_WORD', start_tag='START_TAG',
-                        end_tag='END_TAG'):
-    """
-    Calculate the most likely sentence tagging given the emissions and
-    transitions.
-    :param untagged_sentence: list of words [word, word, ...]
-    :param emissions: dict {(tag, word) : probability}
-    :param transitions: dict {((tag_k, tag_k-1, ... tag_2), (tag_k-1, ...,
-    tag_2, tag_1)) : probability}
-    :param tags: set of all possible tags
-    :param k: 2 for Bigram, 3 for Trigram, etc.
-    :param start_tag: A unique character that never appears in any word,
-    used as placeholder for starting words
-    :return: tagged_sentence List[(word, tag), ...]
-    """
-    # Extend the sentence with (k-1) start tokens to slide over it with a (
-    # k-1)-window
-    # For example: sentence = 'ABCD', k=3, start_word='*', stop_word='$'
-    #              padded_sentence = '**ABCD$'
-    padded_sentence = (k - 1) * [start_word] + untagged_sentence + [end_word]
-
-    # Calculate all (k-1)-words in the sliding (k-1)-window over the input
-    # sentence
-    # For example: sentence = 'ABCD', k=3, start_word='*', stop_word='$'
-    #              padded_sentence = '**ABCD'
-    #              k_1_word = '**', '*A', 'AB', 'BC', 'CD', 'D$'
-    all_k_1_words = [tuple(padded_sentence[i:i + k - 1]) for i in
-                     range(len(untagged_sentence) + 1)]
-
-    # Calculate all possible (k-1)-tags combinations
-    # For example: tags = ['y1', 'y2', 'y3'], k=2
-    #              all_k_1_tags = [['y1', 'y1'], ['y1', 'y2'], ['y1', 'y3'],
-    #                              ['y2', 'y1'], ['y2', 'y2'], ['y2', 'y3'],
-    #                              ['y3', 'y1'], ['y3', 'y2'], ['y3', 'y3']]
-    padded_tags = tags | {start_tag, end_tag}
-    all_k_1_tags = set(product(padded_tags,
-                               repeat=k - 1))  # k-1 because size(Bigram
-    # tags)=1, size(Trigram tags)=2, etc.
-    all_k_tags = set(product(padded_tags, repeat=k))
-
-    # Initialize all (k_1_words, k_1_tags) probabilities
-    # [{(k-1)-tag : p,
-    #   (k-1)-tag : p,
-    #                ...}
-    # ...
-    # ]
-    max_k_1_words_tags_probabilities = [
-        {tuple(k_1_tags): 0 for k_1_tags in all_k_1_tags} for k_1_words in
-        all_k_1_words]
-
-    # Set all first layer probabilities to 1
-    for k_1_tags in max_k_1_words_tags_probabilities[0]:
-        # skip the end-tag
-        if k_1_tags == end_tag:
-            continue
-        max_k_1_words_tags_probabilities[0][k_1_tags] = (1, (0, start_tag))
-
-    # Viterbi over all following probabilities
-    for i in range(1, len(all_k_1_words)):
-        prev_k_1_words = all_k_1_words[i - 1]
-        cur_k_1_words = all_k_1_words[i]
-        for k_tags in all_k_tags:
-            prev_k_1_tags = k_tags[:-1]  # (y-k, ..., y-1)
-            cur_k_1_tags = k_tags[1:]  # (y-k+1, ..., y)
-            transit = (
-                prev_k_1_tags,
-                cur_k_1_tags)  # ((y-k, ..., y-1), (y-k+1, ..., y))
-            emit = (cur_k_1_tags[-1], cur_k_1_words[-1])  # (y, x)
-            transit_prob = emit_prob = 0
-            prev_prob = max_k_1_words_tags_probabilities[i - 1][prev_k_1_tags][
-                0]
-            # TODO: SB - emit_prob = emissions((k-1)*'NN', )
-            if transit in transitions:
-                # set to transit
-                transit_prob = transitions[transit]
-            if emit in emissions:
-                emit_prob = emissions[emit]
-            prob = prev_prob * transit_prob * emit_prob
-
-            # Update max-probabilities if this is the best option so far
-            if prob > max_k_1_words_tags_probabilities[i][tuple(cur_k_1_tags)]:
-                max_k_1_words_tags_probabilities[i][tuple(cur_k_1_tags)] = (
-                    prob, (i - 1,
-                           prev_k_1_tags))  # TODO: (prob, back_pointer) ....
-                # back_pointer = (i-1,prev_k_1_tags)
-
-    # Extract max probability tags and return
-    best_end = max(max_k_1_words_tags_probabilities[-1], key=lambda tags:
-    max_k_1_words_tags_probabilities[-1].get(tags)[0])
-
-    tags = [max(tags_layer, key=lambda tags: tags_layer.get(tags)[0]) for
-            tags_layer in max_k_1_words_tags_probabilities]
-    return [(untagged_sentence[i], tags[i]) for i in range(len(untagged_sentence))]
 
 
 def simplifyTags(tagged_sentences: List[List[Tuple]]) -> List[List[Tuple]]:
@@ -551,53 +307,133 @@ def simplifyTags(tagged_sentences: List[List[Tuple]]) -> List[List[Tuple]]:
             for sentence in tagged_sentences]
 
 
+def get_low_frequency_words(all_tagged_sents, train_tagged_sents):
+    """
+    Return a list of words from the dataset that have a low frequency in the
+    training sentences.
+    :param all_tagged_sents: list [[(word,tag), ...], ...]
+    :param train_tagged_sents: list [[(word, tag), ...], ...]
+    :return: dict {word : frequency in training} for all words in dataset if
+    their frequency in training is less than 5
+    """
+    # Split vocabulary to two parts:
+    # 1) appear at least  5 times in training (high freq)
+    # 2) appear less than 5 times in training (low freq)
+    train_word_counts = Counter()
+    for sentence in train_tagged_sents:
+        for (word, tag) in sentence:
+            train_word_counts[word] += 1
+
+    low_freq = {word: train_word_counts[word]
+                for sentence in all_tagged_sents
+                for (word, tag) in sentence
+                if train_word_counts[word] < 5}
+
+    return low_freq
+
+
+def get_pseudo_class(word):
+    """
+    Returns the first pseudo-tag that matches this word
+    :param word: a word from the dataset
+    :return: a tag from PSEUDO_REGEX that matches it
+    """
+    for tag in PSEUDO_REGEX_COMPILED:
+        if re.match(PSEUDO_REGEX_COMPILED[tag], word):
+            return tag
+
+
+def apply_pseudo_classes(all_sents, train_sents, test_sents):
+    """
+    Replace tags of all low-freq words in train and test sents with pseudo
+    classes, and return new lists of pseudo-tagged sentences.
+    :param all_sents: list [[(word,tag), ...], ...]
+    :param train_sents: list [[(word,tag), ...], ...]
+    :param test_sents: list [[(word,tag), ...], ...]
+    :return: (train_sents_pseudo, test_sents_pseudo)
+    """
+    train_sents_pseudo = deepcopy(train_sents)
+    test_sents_pseudo = deepcopy(test_sents)
+
+    low_freq_words = get_low_frequency_words(all_sents, train_sents)
+
+    # Pseudo-ify the train sentences
+    for sentence in train_sents_pseudo:
+        for j, (word, tag) in enumerate(sentence):
+            if word in low_freq_words:
+                pseudo_tag = get_pseudo_class(word)
+                sentence[j] = (word, pseudo_tag)
+
+    # Pseudo-ify the test sentences
+    for sentence in test_sents_pseudo:
+        for j, (word, tag) in enumerate(sentence):
+            if word in low_freq_words:
+                pseudo_tag = get_pseudo_class(word)
+                sentence[j] = (word, pseudo_tag)
+
+    return (train_sents_pseudo, test_sents_pseudo)
+
+
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
 
     # http://www.nltk.org/book/ch05.html
     brown_tagged_sents = brown.tagged_sents(categories='news')
     brown_simplified_tagged_sents = simplifyTags(brown_tagged_sents)
     simplified_tags = {tag for sentence in brown_simplified_tagged_sents
                        for (word, tag) in sentence}
-    brown_sents = brown.sents(categories='news')
     size = int(len(brown_simplified_tagged_sents) * 0.9)
     train_sents = brown_simplified_tagged_sents[:size]
     test_sents = brown_simplified_tagged_sents[size:]
     test_sents_untagged = [[word for (word, tag) in sentence]
                            for sentence in test_sents]
 
-    # word_probabilities = MLETagger(train_sents)
-    # logging.info(word_probabilities)
-
+    # MLE tagger
     accuracies = getErrorRate(train_sents, test_sents, MLE_tagger)
     logging.info(accuracies)
 
-    #train_sents = [['A', 'C', 'C', 'G', 'T', 'G', 'C', 'A']]
-    #train_emissions = EMISSIONS_BIGRAM
-    #train_transitions = TRANSITIONS_BIGRAM
-    # train_sents = [['meow', 'woof'],]
-    # train_emissions = EMISSIONS_DOGCAT
-    # train_transitions = TRANSITIONS_DOGCAT
-    #logging.info('Emissions: {}'.format(train_emissions))
-    #logging.info('Transitions: {}'.format(train_transitions))
-    train_emissions, train_transitions = bigram_HMM(train_sents, False)
-    logging.info('Emissions: {}'.format(train_emissions))
-    logging.info('Transitions: {}'.format(train_transitions))
-    train_emissions, train_transitions = bigram_HMM(train_sents, True)
-    logging.info('Emissions: {}'.format(train_emissions))
-    logging.info('Transitions: {}'.format(train_transitions))
-
+    # Bigram HMM + Viterbi tagger
+    train_emissions, train_transitions = \
+        bigram_HMM(train_sents, add_one_smoothing=False)
     predictions = []
     for untagged_sentence in test_sents_untagged:
-        new_lst =  bigram_viterbi(untagged_sentence,
-                             train_emissions,
-                             train_transitions,
-                             tags=simplified_tags)
-
-        #logging.info(new_lst)
+        new_lst = bigram_viterbi(untagged_sentence,
+                                 train_emissions,
+                                 train_transitions,
+                                 tags=simplified_tags)
         predictions = predictions + new_lst
-
-
-
     accuracies = getErrorRateBigram(train_sents, test_sents, predictions)
+    logging.info(accuracies)
+
+    # Bigram HMM + Add-1 Smoothing + Viterbi tagger
+    train_emissions_smoothed, train_transitions_smoothed = \
+        bigram_HMM(train_sents, add_one_smoothing=True)
+    predictions_smoothed = []
+    for untagged_sentence in test_sents_untagged:
+        new_lst = bigram_viterbi(untagged_sentence,
+                                 train_emissions_smoothed,
+                                 train_transitions_smoothed,
+                                 tags=simplified_tags)
+        predictions_smoothed = predictions_smoothed + new_lst
+    accuracies = getErrorRateBigram(train_sents, test_sents,
+                                    predictions_smoothed)
+    logging.info(accuracies)
+
+    # Bigram HMM + Pseudo tags + Viterbi tagger
+    train_sents_pseudo, test_sents_pseudo = \
+        apply_pseudo_classes(brown_simplified_tagged_sents,
+                             train_sents,
+                             test_sents)
+    train_emissions_pseudo, train_transitions_pseudo = \
+        bigram_HMM(train_sents_pseudo, add_one_smoothing=False)
+    predictions_pseudo = []
+    for untagged_sentence in test_sents_untagged:
+        new_lst = bigram_viterbi(untagged_sentence,
+                                 train_emissions_pseudo,
+                                 train_transitions_pseudo,
+                                 tags=simplified_tags)
+        predictions_pseudo = predictions_pseudo + new_lst
+    accuracies = getErrorRateBigram(train_sents_pseudo,
+                                    test_sents_pseudo,
+                                    predictions_pseudo)
     logging.info(accuracies)
