@@ -14,13 +14,14 @@ PSEUDO_REGEX = \
     {'_MONEY': '.*\$.*',  # https://regex101.com/r/UoFL0T/1
      '_NUMBER': '\d+',  # https://regex101.com/r/kzCwuJ/2
      '_NUMBERED': '\d+(st|nd|rd|th)',  # https://regex101.com/r/0rLKtF/1
-     '_FUL': '.*ful',
-     '_EST': '.*est',
-     '_ER': '.*er',
-     '_TION': '.*tion',
      '_%': '.*%.*',
      '_.': '.*\..*',  # https://regex101.com/r/Q8H1v1/1
-     '_-': '.*-.*'  # https://regex101.com/r/Q8H1v1/2
+     '_-': '.*-.*',  # https://regex101.com/r/Q8H1v1/2
+     '_FUL': '.*ful$',
+     '_EST': '.*est$',
+     '_ER': '.*er$',
+     '_TION': '.*tion$',
+     '_\'S': '.*\'s?'
      }
 PSEUDO_REGEX_COMPILED = {tag: re.compile(PSEUDO_REGEX[tag]) for tag in
                          PSEUDO_REGEX}
@@ -361,20 +362,100 @@ def apply_pseudo_classes(all_sents, train_sents, test_sents):
     for sentence in train_sents_pseudo:
         for j, (word, tag) in enumerate(sentence):
             if word in low_freq_words:
+                # Attempt adding word to a pseudo tag
                 pseudo_tag = get_pseudo_class(word)
-                sentence[j] = (word, pseudo_tag)
+                if pseudo_tag:
+                    sentence[j] = (word, pseudo_tag)
+                # Otherwise use the original tag
+                else:
+                    sentence[j] = (word, tag)
 
     # Pseudo-ify the test sentences
     for sentence in test_sents_pseudo:
         for j, (word, tag) in enumerate(sentence):
             if word in low_freq_words:
+                # Attempt adding word to a pseudo tag
                 pseudo_tag = get_pseudo_class(word)
-                sentence[j] = (word, pseudo_tag)
+                if pseudo_tag:
+                    sentence[j] = (word, pseudo_tag)
+                # Otherwise use the original tag
+                else:
+                    sentence[j] = (word, tag)
 
     return (train_sents_pseudo, test_sents_pseudo)
 
 
-if __name__ == '__main__':
+def mle_tagger(tagged_train_data,
+               tagged_test_data):
+    """
+    Train a Maximum Likelihood Estimator on the tagged train data, then try
+    it on the test data and report the resulting accuracies.
+    :param tagged_train_data: list [[(word, tag), ...], ...]
+    :param tagged_test_data: list [[(word, tag), ...], ...]
+    :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
+    """
+    accuracies = getErrorRate(tagged_train_data, tagged_test_data, MLE_tagger)
+    logging.info(accuracies)
+    return accuracies
+
+
+def bigram_hmm_viterbi(tagged_all_data,
+                       tagged_train_data,
+                       tagged_test_data,
+                       untagged_test_data,
+                       all_tags,
+                       smoothing=False,
+                       pseudo_classes=False):
+    """
+    Train a Bigram Hidden-Markov-Model on the train data and acquire emission
+    and transition probabilities.
+    optional:
+        * Use 'Add-1' smoothing on the emission probabilities
+        * Use pseudo classes to cluster words with low frequency
+    Run the Viterbi sequence tagging algorithm on the test data and report the
+    resulting accuracies.
+    :param tagged_train_data: list [[(word, tag), ...], ...]
+    :param tagged_test_data: list [[(word, tag), ...], ...]
+    :param untagged_test_data: list [[word, ...], ...]
+    :param all_tags: {tag1, tag2, ...}
+    :param smoothing: bool - apply Add-1 Smoothing to emission probabilities?
+    :param pseudo_classes: bool - cluster low frequency words in
+                                  pseudo-classes?
+    :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
+    """
+    # Refactor pseudo-classes for low frequency words if required
+    if (pseudo_classes):
+        tagged_train_data, tagged_test_data = \
+            apply_pseudo_classes(tagged_all_data,
+                                 tagged_train_data,
+                                 tagged_test_data)
+        all_tags |= {tag for tag in PSEUDO_REGEX}
+
+    # Train a Bigram HMM and get emissions and transitions
+    train_emissions, train_transitions = \
+        bigram_HMM(tagged_train_data, add_one_smoothing=smoothing)
+
+    # Run Viterbi on test data and return accuracies of the results
+    predictions = []
+    for untagged_sentence in untagged_test_data:
+        new_lst = bigram_viterbi(untagged_sentence,
+                                 train_emissions,
+                                 train_transitions,
+                                 tags=all_tags)
+        predictions = predictions + new_lst
+    accuracies = getErrorRateBigram(tagged_train_data,
+                                    tagged_test_data,
+                                    predictions)
+    logging.info(accuracies)
+    return accuracies
+
+
+def main():
+    """
+    Load the Brown corpus and perform several word tagging learning
+    experiments, including MLE (Maximum Likelihood Estimation), Bigram HMM +
+    Viterbi, Smoothing, Pseudo classes.
+    """
     logging.basicConfig(level=logging.INFO)
 
     # http://www.nltk.org/book/ch05.html
@@ -388,52 +469,37 @@ if __name__ == '__main__':
     test_sents_untagged = [[word for (word, tag) in sentence]
                            for sentence in test_sents]
 
-    # MLE tagger
-    accuracies = getErrorRate(train_sents, test_sents, MLE_tagger)
-    logging.info(accuracies)
+    # MLE Tagger
+    logging.info("MLE Tagger")
+    mle_tagger(train_sents, test_sents)
 
-    # Bigram HMM + Viterbi tagger
-    train_emissions, train_transitions = \
-        bigram_HMM(train_sents, add_one_smoothing=False)
-    predictions = []
-    for untagged_sentence in test_sents_untagged:
-        new_lst = bigram_viterbi(untagged_sentence,
-                                 train_emissions,
-                                 train_transitions,
-                                 tags=simplified_tags)
-        predictions = predictions + new_lst
-    accuracies = getErrorRateBigram(train_sents, test_sents, predictions)
-    logging.info(accuracies)
+    # Bigram HMM -> Viterbi Sequence Tagger
+    logging.info("Bigram HMM --> Viterbi")
+    bigram_hmm_viterbi(brown_simplified_tagged_sents,
+                       train_sents,
+                       test_sents,
+                       test_sents_untagged,
+                       simplified_tags)
 
-    # Bigram HMM + Add-1 Smoothing + Viterbi tagger
-    train_emissions_smoothed, train_transitions_smoothed = \
-        bigram_HMM(train_sents, add_one_smoothing=True)
-    predictions_smoothed = []
-    for untagged_sentence in test_sents_untagged:
-        new_lst = bigram_viterbi(untagged_sentence,
-                                 train_emissions_smoothed,
-                                 train_transitions_smoothed,
-                                 tags=simplified_tags)
-        predictions_smoothed = predictions_smoothed + new_lst
-    accuracies = getErrorRateBigram(train_sents, test_sents,
-                                    predictions_smoothed)
-    logging.info(accuracies)
+    # Bigram HMM + Smoothing -> Viterbi Sequence Tagger
+    logging.info("Bigram HMM + Add-1 Smoothing --> Viterbi")
+    bigram_hmm_viterbi(brown_simplified_tagged_sents,
+                       train_sents,
+                       test_sents,
+                       test_sents_untagged,
+                       simplified_tags,
+                       smoothing=True)
 
-    # Bigram HMM + Pseudo tags + Viterbi tagger
-    train_sents_pseudo, test_sents_pseudo = \
-        apply_pseudo_classes(brown_simplified_tagged_sents,
-                             train_sents,
-                             test_sents)
-    train_emissions_pseudo, train_transitions_pseudo = \
-        bigram_HMM(train_sents_pseudo, add_one_smoothing=False)
-    predictions_pseudo = []
-    for untagged_sentence in test_sents_untagged:
-        new_lst = bigram_viterbi(untagged_sentence,
-                                 train_emissions_pseudo,
-                                 train_transitions_pseudo,
-                                 tags=simplified_tags)
-        predictions_pseudo = predictions_pseudo + new_lst
-    accuracies = getErrorRateBigram(train_sents_pseudo,
-                                    test_sents_pseudo,
-                                    predictions_pseudo)
-    logging.info(accuracies)
+
+    # Bigram HMM + Pseudo classes -> Viterbi Sequence Tagger
+    logging.info("Bigram HMM + Pseudo Classes --> Viterbi")
+    bigram_hmm_viterbi(brown_simplified_tagged_sents,
+                       train_sents,
+                       test_sents,
+                       test_sents_untagged,
+                       simplified_tags,
+                       pseudo_classes=True)
+
+
+if __name__ == '__main__':
+    main()
