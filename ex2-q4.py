@@ -192,22 +192,19 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
     #           word_tag_counts[x][y]
     #  e(x|y) = ---------------------
     #               tag_counts[y]
-    tag_word_counts = {tag: {word: word_tag_counts[word][tag] for word in
-                             word_tag_counts if tag in word_tag_counts[word]}
-                       for tag in tag_counts}
+    total_counts = sum(tag_counts.values())
     for sentence in padded_tagged_sentences:
         for (word, tag) in sentence[1:]:  # skip 'start' tag
             if add_one_smoothing:
                 emissions[(tag, word)] = \
                     (word_tag_counts[word][tag] + 1) / \
-                    (tag_counts[tag] + len(tag_word_counts[tag]))
+                    (tag_counts[tag] + total_counts)
             else:
                 emissions[(tag, word)] = \
                     word_tag_counts[word][tag] / \
                     tag_counts[tag]
 
     emissions[(END_TAG, END_WORD)] = 1
-
     #              bigrams[(y-1, y)]
     #  q(y|y-1) =  -----------------
     #               unigrams[(y-1)]
@@ -217,13 +214,15 @@ def bigram_HMM(tagged_sentences: List[List[Tuple]],
         transitions[(prev_gram, cur_gram)] = \
             bigrams[tags_bigram] / unigrams[prev_gram]
 
-    return emissions, transitions
+    return emissions, transitions, tag_counts
 
 
 def bigram_viterbi(untagged_sentence,
                    emissions,
                    transitions,
                    tags,
+                   tag_counts,
+                   add_one_smoothing,
                    unknown_tag='NN'):
     """
     Calculate the most likely sentence tagging given the emissions and
@@ -242,6 +241,7 @@ def bigram_viterbi(untagged_sentence,
     backpointers = {i: {tag: None for tag in padded_tags} for i in
                     range(len(padded_sentence))}
     viterbi[0][START_TAG] = 1
+    total_counts = sum(tag_counts.values())
 
     # Set all unknown words (no emission) to have the tag 'NN'
     for word in untagged_sentence:
@@ -251,7 +251,8 @@ def bigram_viterbi(untagged_sentence,
             if emit in emissions:
                 has_emissions = True
         if (not has_emissions):
-            emissions[('NN', word)] = 1
+            if not add_one_smoothing:
+                emissions[(unknown_tag, word)] = 1/tag_counts[unknown_tag]
 
     for i in range(1, len(padded_sentence)):
         word = padded_sentence[i]
@@ -266,7 +267,10 @@ def bigram_viterbi(untagged_sentence,
                     transition = transitions[transit]
 
                 if emit not in emissions:
-                    emission = 0
+                    if add_one_smoothing:
+                        emission = 1.0 / (total_counts + tag_counts[cur_tag])
+                    else:
+                        emission = 0
                 else:
                     emission = emissions[emit]
 
@@ -432,7 +436,7 @@ def bigram_hmm_viterbi(tagged_all_data,
         all_tags |= {tag for tag in PSEUDO_REGEX}
 
     # Train a Bigram HMM and get emissions and transitions
-    train_emissions, train_transitions = \
+    train_emissions, train_transitions, tag_counts = \
         bigram_HMM(tagged_train_data, add_one_smoothing=smoothing)
 
     # Run Viterbi on test data and return accuracies of the results
@@ -441,7 +445,9 @@ def bigram_hmm_viterbi(tagged_all_data,
         new_lst = bigram_viterbi(untagged_sentence,
                                  train_emissions,
                                  train_transitions,
-                                 tags=all_tags)
+                                 all_tags,
+                                 tag_counts,
+                                 add_one_smoothing=smoothing)
         predictions = predictions + new_lst
     accuracies = getErrorRateBigram(tagged_train_data,
                                     tagged_test_data,
@@ -489,7 +495,6 @@ def main():
                        test_sents_untagged,
                        simplified_tags,
                        smoothing=True)
-
 
     # Bigram HMM + Pseudo classes -> Viterbi Sequence Tagger
     logging.info("Bigram HMM + Pseudo Classes --> Viterbi")
