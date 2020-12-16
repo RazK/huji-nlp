@@ -4,6 +4,9 @@ from collections import Counter
 from copy import deepcopy
 from typing import List, Tuple, Dict
 from nltk.corpus import brown
+from sklearn.metrics import confusion_matrix
+import numpy as np
+import matplotlib.pyplot as plt
 
 START_TAG = 'START_TAG'
 END_TAG = 'END_TAG'
@@ -66,29 +69,38 @@ def getErrorRate(train_data, test_data, MLETagger, default_tag='NN'):
     accuracyTotal = \
         (correctWords['known'] + correctWords['unknown']) / len(flatTestData)
 
-    return (accuracyTotal, accuracyKnown, accuracyUnknown)
+    return (1 - accuracyTotal, 1 - accuracyKnown, 1 - accuracyUnknown)
 
 
-def getErrorRateBigram(train_data, test_data, train_predictions,
+def getErrorRateBigram(train_data, test_data, predictions, all_tags,
+                       plot_confusion_matrix=False,
                        default_tag='NN'):
     """
     Calculate the error rate (1-accuracy) of the MLE Tagger.
     :param train_data: list of tagged sentences [[(word, tag), ...], ...]
     :param test_data:  list of tagged sentences [[(word, tag), ...], ...]
-    :param MLETagger:  function(tagged_sentences) -->
+    :param all_tags: set of all tags in the data (train + test)
+    :param predictions: list of tagged words [(word, tag), ...]
+    :param plot_confusion_matrix: set to True to plot.
     :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
     """
     train_mle = MLE_tagger(train_data)
-    totalWords = {'known': 0,
+    total_words = {'known': 0,
                   'unknown': 0}
-    correctWords = {'known': 0,
+    correct_words = {'known': 0,
                     'unknown': 0}
 
-    flatTestData = [(word, tag) for sentence in test_data
+    flat_test_data = [(word, tag) for sentence in test_data
                     for (word, tag) in sentence]
 
+    if plot_confusion_matrix:
+        test_true_tags = [tag for sentence in test_data
+                          for (word, tag) in sentence]
+        test_pred_tags = [tag for (word, tag) in predictions]
+        plot_confusion_matrix(test_true_tags, test_pred_tags, all_tags)
+
     # Go over all test data and count correct predictions
-    for i, (word, tag) in enumerate(flatTestData):
+    for i, (word, tag) in enumerate(flat_test_data):
         # Known words
         if word in train_mle:
             type = 'known'
@@ -97,16 +109,16 @@ def getErrorRateBigram(train_data, test_data, train_predictions,
         else:
             type = 'unknown'
 
-        totalWords[type] += 1
-        if tag == train_predictions[i][1]:
-            correctWords[type] += 1
+        total_words[type] += 1
+        if tag == predictions[i][1]:
+            correct_words[type] += 1
 
-    accuracyKnown = correctWords['known'] / totalWords['known']
-    accuracyUnknown = correctWords['unknown'] / totalWords['unknown']
+    accuracyKnown = correct_words['known'] / total_words['known']
+    accuracyUnknown = correct_words['unknown'] / total_words['unknown']
     accuracyTotal = \
-        (correctWords['known'] + correctWords['unknown']) / len(flatTestData)
+        (correct_words['known'] + correct_words['unknown']) / len(flat_test_data)
 
-    return (accuracyTotal, accuracyKnown, accuracyUnknown)
+    return (1 - accuracyTotal, 1 - accuracyKnown, 1 - accuracyUnknown)
 
 
 def MLE_tagger(tagged_sentences: List[List[Tuple]]) -> Dict:
@@ -409,7 +421,8 @@ def bigram_hmm_viterbi(tagged_all_data,
                        untagged_test_data,
                        all_tags,
                        smoothing=False,
-                       pseudo_classes=False):
+                       pseudo_classes=False,
+                       plot_confusion_matrix=False):
     """
     Train a Bigram Hidden-Markov-Model on the train data and acquire emission
     and transition probabilities.
@@ -425,6 +438,7 @@ def bigram_hmm_viterbi(tagged_all_data,
     :param smoothing: bool - apply Add-1 Smoothing to emission probabilities?
     :param pseudo_classes: bool - cluster low frequency words in
                                   pseudo-classes?
+    :param plot_confusion_matrix: bool - True to plot confusion matrix.
     :return: tuple (1-accuracyTotal, 1-accuracyKnown, 1-accuracyUnknown)
     """
     # Refactor pseudo-classes for low frequency words if required
@@ -451,12 +465,51 @@ def bigram_hmm_viterbi(tagged_all_data,
         predictions = predictions + new_lst
     accuracies = getErrorRateBigram(tagged_train_data,
                                     tagged_test_data,
-                                    predictions)
+                                    predictions,
+                                    all_tags,
+                                    plot_confusion_matrix=plot_confusion_matrix)
     logging.info(accuracies)
     return accuracies
 
 
+def plot_confusion_matrix(y_true=["cat", "ant", "cat", "cat", "ant", "bird"],
+                          y_pred=["ant", "ant", "cat", "cat", "ant", "cat"],
+                          tags=["ant", "bird", "cat"]):
+    # sphinx_gallery_thumbnail_number = 2
+
+    harvest = confusion_matrix(y_true, y_pred, labels=tags)
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(harvest)
+
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(len(tags)))
+    ax.set_yticks(np.arange(len(tags)))
+    # ... and label them with the respective list entries
+    ax.set_xticklabels(tags)
+    ax.set_yticklabels(tags)
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    # Loop over data dimensions and create text annotations.
+    for i in range(len(tags)):
+        for j in range(len(tags)):
+            text = ax.text(j, i, harvest[i, j],
+                           ha="center", va="center", color="w")
+
+    ax.set_title("Confusion Matrix (True / Predicted)")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    fig.tight_layout()
+    plt.show()
+
 def main():
+    plot_confusion_matrix(y_true=["NN","CYBER","NX","GAY","CYBER","NN"],
+                          y_pred=["NN","NN","CYBER","NN","CYBER","NN"],
+                          tags=["CYBER","NN","GAY","NX","MOTEK"])
+
     """
     Load the Brown corpus and perform several word tagging learning
     experiments, including MLE (Maximum Likelihood Estimation), Bigram HMM +
@@ -504,6 +557,17 @@ def main():
                        test_sents_untagged,
                        simplified_tags,
                        pseudo_classes=True)
+
+    # Bigram HMM + Pseudo classes + Smoothing -> Viterbi Sequence Tagger
+    logging.info("Bigram HMM + Pseudo Classes + Smoothing --> Viterbi")
+    bigram_hmm_viterbi(brown_simplified_tagged_sents,
+                       train_sents,
+                       test_sents,
+                       test_sents_untagged,
+                       simplified_tags,
+                       smoothing=True,
+                       pseudo_classes=True,
+                       plot_confusion_matrix=True)
 
 
 if __name__ == '__main__':
