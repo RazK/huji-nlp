@@ -125,7 +125,9 @@ def get_one_hot(size, ind):
     :param ind: the entry index to turn to 1
     :return: numpy ndarray which represents the one-hot vector
     """
-    return
+    one_hot = np.zeros(size)
+    np.put(one_hot,ind,1)
+    return one_hot
 
 
 def average_one_hots(sent, word_to_ind):
@@ -136,7 +138,11 @@ def average_one_hots(sent, word_to_ind):
     :param word_to_ind: a mapping between words to indices
     :return:
     """
-    return
+    size = len(word_to_ind)
+    sum_one_hots = np.zeros(size)
+    for word in sent:
+        sum_one_hots += get_one_hot(size, word_to_ind[word])
+    return sum_one_hots / len(sent)
 
 
 def get_word_to_ind(words_list):
@@ -146,7 +152,7 @@ def get_word_to_ind(words_list):
     :param words_list: a list of words
     :return: the dictionary mapping words to the index
     """
-    return
+    return {word: words_list.index(word) for word in words_list}
 
 
 def sentence_to_embedding(sent, word_to_vec, seq_len, embedding_dim=300):
