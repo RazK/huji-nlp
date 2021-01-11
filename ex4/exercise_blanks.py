@@ -287,10 +287,11 @@ class LogLinear(nn.Module):
     general class for the log-linear models for sentiment analysis.
     """
     def __init__(self, embedding_dim):
-        return
+        super(LogLinear, self).__init__()
+        self.linear = torch.nn.Linear(embedding_dim, 1)
 
     def forward(self, x):
-        return
+        return F.log_softmax(self.linear(x), dim=1)
 
     def predict(self, x):
         return
