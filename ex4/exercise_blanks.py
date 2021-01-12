@@ -9,6 +9,7 @@ import operator
 import data_loader
 import pickle
 import tqdm
+import matplotlib.pyplot as plt
 
 # ------------------------------------------- Constants ----------------------------------------
 
@@ -322,8 +323,25 @@ def train_epoch(model, data_iterator, optimizer, criterion):
     :param criterion: the criterion object for the training process.
     """
 
-    return
+    running_loss = 0
+    running_accuracy = 0
+    count = 0
+    for i, data in enumerate(data_iterator, 0):
+        count += 1
+        input, label = data
 
+        optimizer.zero_grad()  # TODO: WTF?
+        output = model(input)
+
+        loss = criterion(input, output)  # TODO: (out, in) or (in, out)?
+        running_loss += loss.item()  # TODO: WTF?
+        if np.round(label) == np.round(output):
+            running_accuracy += 1
+
+        loss.backward()
+        optimizer.step()
+
+    return running_loss/count, running_accuracy/count
 
 def evaluate(model, data_iterator, criterion):
     """
@@ -333,7 +351,24 @@ def evaluate(model, data_iterator, criterion):
     :param criterion: the loss criterion used for evaluation
     :return: tuple of (average loss over all examples, average accuracy over all examples)
     """
-    return
+    with torch.no_grad():
+        running_loss = 0
+        running_accuracy = 0
+        count = 0
+        for i, data in enumerate(data_iterator, 0):
+            count += 1
+            input, label = data
+
+            output = model(input)
+
+            loss = criterion(input, output)  # TODO: (out, in) or (in, out)?
+            running_loss += loss.item()  # TODO: WTF?
+            if np.round(label) == np.round(output):
+                running_accuracy += 1
+
+            #loss.backward()   TODO: check if this is needed
+
+    return running_loss/count, running_accuracy/count
 
 
 def get_predictions_for_data(model, data_iter):
@@ -359,13 +394,25 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     :param lr: learning rate to be used for optimization
     :param weight_decay: parameter for l2 regularization
     """
-    return
 
+    optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay=weight_decay)
+    criterion = nn.BCELoss()
+
+    for epoch in range(n_epochs):
+        train_loss, train_accuracy = train_epoch(model, data_manager, optimizer, criterion)
+        validation_loss, validation_accuracy = evaluate(model, data_manager, criterion)
+    plt.plot(train_loss, range(n_epochs))
+    plt.plot(train_accuracy, range(n_epochs))
+    plt.plot(validation_loss, range(n_epochs))
+    plt.plot(validation_accuracy, range(n_epochs))
+    plt.show()
 
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
+    #train_model(LogLinear, )
+
     return
 
 
