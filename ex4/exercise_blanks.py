@@ -404,9 +404,20 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay=weight_decay)
     criterion = nn.BCELoss()
 
+    train_data = torch.from_numpy(data_manager.get_torch_iterator(TRAIN))
+    test_data = torch.from_numpy(data_manager.get_torch_iterator(TEST))
+    train_labels = torch.from_numpy(data_manager.get_torch_iterator(TRAIN))
+    test_labels = torch.from_numpy(data_manager.get_torch_iterator(TEST))
+
+    train = torch.utils.data.TensorDataset(train_data, train_labels)
+    test = torch.utils.data.TensorDataset(test_data, test_labels)
+
+    trainloader = torch.utils.data.DataLoader(train, batch_size=64, shuffle=True)
+    testloader = torch.utils.data.DataLoader(test, batch_size=64, shuffle=True)
+
     for epoch in range(n_epochs):
-        train_loss, train_accuracy = train_epoch(model, data_manager, optimizer, criterion)
-        validation_loss, validation_accuracy = evaluate(model, data_manager, criterion)
+        train_loss, train_accuracy = train_epoch(model, trainloader, optimizer, criterion)
+        validation_loss, validation_accuracy = evaluate(model, testloader, criterion)
     plt.plot(train_loss, range(n_epochs))
     plt.plot(train_accuracy, range(n_epochs))
     plt.plot(validation_loss, range(n_epochs))
@@ -417,7 +428,8 @@ def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
-    #train_model(LogLinear, )
+    data_manager = DataManager()
+    train_model(LogLinear, data_manager, 20, 0.01, 0.0001)
 
     return
 
