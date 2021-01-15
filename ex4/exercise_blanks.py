@@ -141,9 +141,9 @@ def average_one_hots(sent, word_to_ind):
     """
     size = len(word_to_ind)
     sum_one_hots = np.zeros(size)
-    for word in sent:
+    for word in sent.text:
         sum_one_hots += get_one_hot(size, word_to_ind[word])
-    return sum_one_hots / len(sent)
+    return sum_one_hots / len(sent.text)
 
 
 def get_word_to_ind(words_list):
@@ -332,20 +332,34 @@ def train_epoch(model, data_iterator, optimizer, criterion):
     running_loss = 0
     running_accuracy = 0
     count = 0
+    running_loss_for_print = 0
     for i, data in enumerate(data_iterator, 0):
         count += 1
         input, label = data
-
         optimizer.zero_grad()  # TODO: WTF?
-        output = model(input)
-
-        loss = criterion(input, output)  # TODO: (out, in) or (in, out)?
+        output = model(input.float())
+        resized_label = label.float().view(10, 1)
+        resized_output = output.float().view(10, 1)
+        #print(label.float().view(10, 1).shape)
+        #print(output.float().view(10, 1).shape)
+        loss = criterion(resized_output, resized_label)  # TODO: (out, in) or (in, out)?
         running_loss += loss.item()  # TODO: WTF?
-        if np.round(label) == np.round(output):
-            running_accuracy += 1
+        running_loss_for_print += loss.item()
+        if(i%100 == 0):
+            print(running_loss_for_print/100)
+            running_loss_for_print = 0
+
+        #if resized_label.detach().numpy() == resized_output.detach().numpy():
+        #    print("hhh")
+
+        #total += labels.size(0)
+        #correct += (predicted == labels).sum().item()
+        #if np.round(resized_label.detach().numpy()) == np.round(resized_output.detach().numpy()):
+        #    running_accuracy += 1
 
         loss.backward()
         optimizer.step()
+        #print(loss.item())
 
     return running_loss/count, running_accuracy/count
 
@@ -365,15 +379,19 @@ def evaluate(model, data_iterator, criterion):
             count += 1
             input, label = data
 
-            output = model(input)
+            output = model(input.float())
+            #print(label)
+            resized_label = label.float().view(10, 1)
+            resized_output = output.float().view(10, 1)
 
-            loss = criterion(input, output)  # TODO: (out, in) or (in, out)?
+            loss = criterion(resized_output, resized_label)   # TODO: (out, in) or (in, out)?
             running_loss += loss.item()  # TODO: WTF?
-            if np.round(label) == np.round(output):
-                running_accuracy += 1
+            #if np.round(resized_label) == np.round(resized_output):
+            #    running_accuracy += 1
+
 
             #loss.backward()   TODO: check if this is needed
-
+            #print(loss.item())
     return running_loss/count, running_accuracy/count
 
 
@@ -403,33 +421,42 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
 
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay=weight_decay)
     criterion = nn.BCELoss()
+    #criterion = nn.BCEWithLogitsLoss()
 
-    train_data = torch.from_numpy(data_manager.get_torch_iterator(TRAIN))
-    test_data = torch.from_numpy(data_manager.get_torch_iterator(TEST))
-    train_labels = torch.from_numpy(data_manager.get_torch_iterator(TRAIN))
-    test_labels = torch.from_numpy(data_manager.get_torch_iterator(TEST))
+    trainloader = data_manager.get_torch_iterator(TRAIN)
+    testloader = data_manager.get_torch_iterator(TRAIN)
 
-    train = torch.utils.data.TensorDataset(train_data, train_labels)
-    test = torch.utils.data.TensorDataset(test_data, test_labels)
 
-    trainloader = torch.utils.data.DataLoader(train, batch_size=64, shuffle=True)
-    testloader = torch.utils.data.DataLoader(test, batch_size=64, shuffle=True)
-
+    train_losses = []
+    train_accuracies = []
+    validation_losses = []
+    validation_accuracies = []
     for epoch in range(n_epochs):
+        print(epoch)
         train_loss, train_accuracy = train_epoch(model, trainloader, optimizer, criterion)
         validation_loss, validation_accuracy = evaluate(model, testloader, criterion)
-    plt.plot(train_loss, range(n_epochs))
-    plt.plot(train_accuracy, range(n_epochs))
-    plt.plot(validation_loss, range(n_epochs))
-    plt.plot(validation_accuracy, range(n_epochs))
+        train_losses.append(train_loss)
+        train_accuracies.append(train_accuracy)
+        validation_losses.append(validation_loss)
+        validation_accuracies.append(validation_accuracy)
+
+    print(train_losses)
+    print(validation_losses)
+    print(train_accuracies)
+    print(validation_accuracies)
+    plt.plot(train_losses, range(n_epochs))
+    plt.plot(train_accuracies, range(n_epochs))
+    plt.plot(validation_losses, range(n_epochs))
+    plt.plot(validation_accuracies, range(n_epochs))
     plt.show()
 
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
-    data_manager = DataManager()
-    train_model(LogLinear, data_manager, 20, 0.01, 0.0001)
+    data_manager = DataManager(batch_size=10)
+    model = LogLinear(16271)
+    train_model(model, data_manager, 3, 0.01, 0.0001)
 
     return
 
