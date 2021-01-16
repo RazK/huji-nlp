@@ -295,10 +295,14 @@ class LogLinear(nn.Module):
     """
     def __init__(self, embedding_dim):
         super(LogLinear, self).__init__()
-        self.linear = torch.nn.Linear(embedding_dim, 1)
+        #super().__init__()
+        self.linear = torch.nn.Linear(embedding_dim, 1, bias=True)
 
     def forward(self, x):
-        return F.log_softmax(self.linear(x), dim=1)
+        #output = F.log_softmax(self.linear(x), dim=1)
+        #output = self.sigmoid(output)
+        output = self.linear(x)
+        return output
 
     def predict(self, x):
         return
@@ -336,10 +340,17 @@ def train_epoch(model, data_iterator, optimizer, criterion):
     for i, data in enumerate(data_iterator, 0):
         count += 1
         input, label = data
+        if(len(label)< 64):
+            continue
         optimizer.zero_grad()  # TODO: WTF?
+        #print(input.shape)
+        #print(input.float())
         output = model(input.float())
-        resized_label = label.float().view(10, 1)
-        resized_output = output.float().view(10, 1)
+        #print(output)
+        resized_label = label.float().view(64, 1)
+        resized_output = output.float().view(64, 1)
+        #print(label)
+        #print(output)
         #print(label.float().view(10, 1).shape)
         #print(output.float().view(10, 1).shape)
         loss = criterion(resized_output, resized_label)  # TODO: (out, in) or (in, out)?
@@ -378,11 +389,12 @@ def evaluate(model, data_iterator, criterion):
         for i, data in enumerate(data_iterator, 0):
             count += 1
             input, label = data
-
+            if (len(label) < 64):
+                continue
             output = model(input.float())
             #print(label)
-            resized_label = label.float().view(10, 1)
-            resized_output = output.float().view(10, 1)
+            resized_label = label.float().view(64, 1)
+            resized_output = output.float().view(64, 1)
 
             loss = criterion(resized_output, resized_label)   # TODO: (out, in) or (in, out)?
             running_loss += loss.item()  # TODO: WTF?
@@ -420,11 +432,11 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     """
 
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay=weight_decay)
-    criterion = nn.BCELoss()
-    #criterion = nn.BCEWithLogitsLoss()
+    #criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
 
     trainloader = data_manager.get_torch_iterator(TRAIN)
-    testloader = data_manager.get_torch_iterator(TRAIN)
+    testloader = data_manager.get_torch_iterator(VAL)
 
 
     train_losses = []
@@ -444,19 +456,19 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     print(validation_losses)
     print(train_accuracies)
     print(validation_accuracies)
-    plt.plot(train_losses, range(n_epochs))
-    plt.plot(train_accuracies, range(n_epochs))
-    plt.plot(validation_losses, range(n_epochs))
-    plt.plot(validation_accuracies, range(n_epochs))
+    plt.plot(range(n_epochs), train_losses)
+    #plt.plot(train_accuracies, range(n_epochs))
+    plt.plot(range(n_epochs), validation_losses)
+    #plt.plot(validation_accuracies, range(n_epochs))
     plt.show()
 
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
-    data_manager = DataManager(batch_size=10)
+    data_manager = DataManager(batch_size=64)
     model = LogLinear(16271)
-    train_model(model, data_manager, 3, 0.01, 0.0001)
+    train_model(model, data_manager, 10, 0.01, 0.0001)
 
     return
 
