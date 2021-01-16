@@ -365,6 +365,7 @@ def train_epoch(model, data_iterator, optimizer, criterion):
 
         #total += labels.size(0)
         #correct += (predicted == labels).sum().item()
+        print(resized_label[0])
         #if np.round(resized_label.detach().numpy()) == np.round(resized_output.detach().numpy()):
         #    running_accuracy += 1
 
