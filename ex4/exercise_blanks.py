@@ -302,7 +302,7 @@ class LogLinear(nn.Module):
     """
     def __init__(self, embedding_dim):
         super(LogLinear, self).__init__()
-        self.linear = torch.nn.Linear(embedding_dim, 1, bias=True)
+        self.linear = torch.nn.Linear(embedding_dim, 1)
         self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, x):
@@ -400,7 +400,7 @@ def evaluate(model, data_iterator, criterion):
             test_correct += binary_accuracy(predictions, actual) * len(actual)
 
     print(
-        '\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+        '\nValidation set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             test_loss, test_correct, limit,
             100. * test_correct / limit))
     return test_loss / limit, test_correct / limit
@@ -431,6 +431,7 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     """
     train_loader = data_manager.get_torch_iterator(TRAIN)
     validation_loader = data_manager.get_torch_iterator(VAL)
+    test_loader = data_manager.get_torch_iterator(TEST)
     optimizer = optim.Adam(model.parameters(), lr=lr,
                            weight_decay=weight_decay)
     criterion = nn.BCEWithLogitsLoss()
@@ -450,6 +451,11 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
         train_accuracies.append(train_accuracy)
         validation_losses.append(validation_loss)
         validation_accuracies.append(validation_accuracy)
+
+    test_loss, test_accuracy = evaluate(model,test_loader,criterion)
+    print("Test set: Average loss: {:.4f}, Accuracy: {:.0f}%"
+          .format(test_loss, test_accuracy))
+
 
     plt.title("Training Loss Curve (batch_size={}, lr={})".format(
         train_loader.batch_size, lr))
