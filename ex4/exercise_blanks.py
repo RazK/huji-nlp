@@ -1,3 +1,5 @@
+from itertools import islice
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +26,11 @@ TRAIN = "train"
 VAL = "val"
 TEST = "test"
 
+BATCH_SIZE = 64  # Instructed by the PDF, page 5
+EMBEDDING_DIM = 16271  # TODO: Shahaf: Why?
+N_EPOCHS = 10  # TODO: Shahaf: Why?
+LEARNING_RATE = 0.01  # Instructed by the PDF, page 5
+WEIGHT_DECAY = 0.0001  # Instructed by the PDF, page 5
 
 # ------------------------------------------ Helper methods and classes --------------------------
 
@@ -127,7 +134,7 @@ def get_one_hot(size, ind):
     :return: numpy ndarray which represents the one-hot vector
     """
     one_hot = np.zeros(size)
-    np.put(one_hot,ind,1)
+    np.put(one_hot, ind, 1)
     return one_hot
 
 
@@ -295,17 +302,14 @@ class LogLinear(nn.Module):
     """
     def __init__(self, embedding_dim):
         super(LogLinear, self).__init__()
-        #super().__init__()
         self.linear = torch.nn.Linear(embedding_dim, 1, bias=True)
+        self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, x):
-        #output = F.log_softmax(self.linear(x), dim=1)
-        #output = self.sigmoid(output)
-        output = self.linear(x)
-        return output
+        return self.linear(x)
 
     def predict(self, x):
-        return
+        return self.sigmoid(self.forward(x))
 
 
 # ------------------------- training functions -------------
@@ -319,11 +323,11 @@ def binary_accuracy(preds, y):
     :param y: a vector of true labels
     :return: scalar value - (<number of accurate predictions> / <number of examples>)
     """
+    return (0.5 < preds).type(y.dtype).eq(y.view_as(preds)).sum().item() / \
+           len(y)
 
-    return
 
-
-def train_epoch(model, data_iterator, optimizer, criterion):
+def train_epoch(model, data_iterator, optimizer, criterion, epoch):
     """
     This method operates one epoch (pass over the whole train set) of training of the given model,
     and returns the accuracy and loss for this epoch
@@ -331,49 +335,42 @@ def train_epoch(model, data_iterator, optimizer, criterion):
     :param data_iterator: an iterator, iterating over the training data for the model.
     :param optimizer: the optimizer object for the training process.
     :param criterion: the criterion object for the training process.
+    :param epoch: the number of the current epoch (for logging)
     """
+    model.train()
+    num_full_batches = int(len(data_iterator.dataset) /
+                           data_iterator.batch_size)
+    limit = num_full_batches * data_iterator.batch_size
 
-    running_loss = 0
-    running_accuracy = 0
-    count = 0
-    running_loss_for_print = 0
-    for i, data in enumerate(data_iterator, 0):
-        count += 1
-        input, label = data
-        if(len(label)< 64):
-            continue
-        optimizer.zero_grad()  # TODO: WTF?
-        #print(input.shape)
-        #print(input.float())
-        output = model(input.float())
-        #print(output)
-        resized_label = label.float().view(64, 1)
-        resized_output = output.float().view(64, 1)
-        #print(label)
-        #print(output)
-        #print(label.float().view(10, 1).shape)
-        #print(output.float().view(10, 1).shape)
-        loss = criterion(resized_output, resized_label)  # TODO: (out, in) or (in, out)?
-        running_loss += loss.item()  # TODO: WTF?
-        running_loss_for_print += loss.item()
-        if(i%100 == 0):
-            print(running_loss_for_print/100)
-            running_loss_for_print = 0
-
-        #if resized_label.detach().numpy() == resized_output.detach().numpy():
-        #    print("hhh")
-
-        #total += labels.size(0)
-        #correct += (predicted == labels).sum().item()
-        print(resized_label[0])
-        #if np.round(resized_label.detach().numpy()) == np.round(resized_output.detach().numpy()):
-        #    running_accuracy += 1
-
+    train_loss = 0
+    train_correct = 0
+    for batch_idx, (inputs, labels) in islice(enumerate(data_iterator),
+                                              num_full_batches):
+        optimizer.zero_grad()
+        actual = labels.reshape(data_iterator.batch_size, 1).type(
+            torch.FloatTensor)
+        outputs = model(inputs.type(torch.FloatTensor))
+        predictions = model.predict(inputs.type(torch.FloatTensor))
+        loss = criterion(outputs, actual)
         loss.backward()
         optimizer.step()
-        #print(loss.item())
 
-    return running_loss/count, running_accuracy/count
+        train_loss += float(loss)
+        train_correct += binary_accuracy(predictions, actual) * len(actual)
+
+        if (batch_idx % 100 == 0):
+            print(
+                'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tAccuracy: '
+                '{}/{} ({:.0f}%)'.format(
+                    epoch,
+                    batch_idx * len(inputs), limit, 100. * batch_idx /
+                    num_full_batches, loss.item(),
+                    train_correct, (batch_idx + 1) * data_iterator.batch_size,
+                    100. * train_correct / ((batch_idx + 1) *
+                                            data_iterator.batch_size)))
+
+    return train_loss / limit, train_correct / limit
+
 
 def evaluate(model, data_iterator, criterion):
     """
@@ -381,31 +378,32 @@ def evaluate(model, data_iterator, criterion):
     :param model: one of our models..
     :param data_iterator: torch data iterator for the relevant subset
     :param criterion: the loss criterion used for evaluation
-    :return: tuple of (average loss over all examples, average accuracy over all examples)
+    :return: tuple of (average loss over all examples, average accuracy over
+    all examples)
     """
+    model.eval()
+    num_full_batches = int(len(data_iterator.dataset) /
+                           data_iterator.batch_size)
+    limit = num_full_batches * data_iterator.batch_size
+
+    test_loss = 0
+    test_correct = 0
     with torch.no_grad():
-        running_loss = 0
-        running_accuracy = 0
-        count = 0
-        for i, data in enumerate(data_iterator, 0):
-            count += 1
-            input, label = data
-            if (len(label) < 64):
-                continue
-            output = model(input.float())
-            #print(label)
-            resized_label = label.float().view(64, 1)
-            resized_output = output.float().view(64, 1)
+        for batch_idx, (inputs, labels) in islice(enumerate(data_iterator),
+                                                  num_full_batches):
+            actual = labels.reshape(data_iterator.batch_size, 1).type(
+                torch.FloatTensor)
+            outputs = model(inputs.type(torch.FloatTensor))
+            predictions = model.predict(inputs.type(torch.FloatTensor))
+            loss = criterion(outputs, actual)
+            test_loss += float(loss)
+            test_correct += binary_accuracy(predictions, actual) * len(actual)
 
-            loss = criterion(resized_output, resized_label)   # TODO: (out, in) or (in, out)?
-            running_loss += loss.item()  # TODO: WTF?
-            #if np.round(resized_label) == np.round(resized_output):
-            #    running_accuracy += 1
-
-
-            #loss.backward()   TODO: check if this is needed
-            #print(loss.item())
-    return running_loss/count, running_accuracy/count
+    print(
+        '\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+            test_loss, test_correct, limit,
+            100. * test_correct / limit))
+    return test_loss / limit, test_correct / limit
 
 
 def get_predictions_for_data(model, data_iter):
@@ -431,14 +429,11 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     :param lr: learning rate to be used for optimization
     :param weight_decay: parameter for l2 regularization
     """
-
-    optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay=weight_decay)
-    #criterion = nn.BCELoss()
+    train_loader = data_manager.get_torch_iterator(TRAIN)
+    validation_loader = data_manager.get_torch_iterator(VAL)
+    optimizer = optim.Adam(model.parameters(), lr=lr,
+                           weight_decay=weight_decay)
     criterion = nn.BCEWithLogitsLoss()
-
-    trainloader = data_manager.get_torch_iterator(TRAIN)
-    testloader = data_manager.get_torch_iterator(VAL)
-
 
     train_losses = []
     train_accuracies = []
@@ -446,32 +441,43 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     validation_accuracies = []
     for epoch in range(n_epochs):
         print(epoch)
-        train_loss, train_accuracy = train_epoch(model, trainloader, optimizer, criterion)
-        validation_loss, validation_accuracy = evaluate(model, testloader, criterion)
+        train_loss, train_accuracy = train_epoch(model, train_loader,
+                                                 optimizer, criterion, epoch)
+        validation_loss, validation_accuracy = evaluate(model,
+                                                        validation_loader,
+                                                        criterion)
         train_losses.append(train_loss)
         train_accuracies.append(train_accuracy)
         validation_losses.append(validation_loss)
         validation_accuracies.append(validation_accuracy)
 
-    print(train_losses)
-    print(validation_losses)
-    print(train_accuracies)
-    print(validation_accuracies)
-    plt.plot(range(n_epochs), train_losses)
-    #plt.plot(train_accuracies, range(n_epochs))
-    plt.plot(range(n_epochs), validation_losses)
-    #plt.plot(validation_accuracies, range(n_epochs))
+    plt.title("Training Loss Curve (batch_size={}, lr={})".format(
+        train_loader.batch_size, lr))
+    plt.plot(range(n_epochs), train_losses, label="Train")
+    plt.plot(range(n_epochs), validation_losses, label="Validation")
+    plt.xlabel("Iterations")
+    plt.ylabel("Training Loss")
+    plt.legend(loc='best')
     plt.show()
+
+    plt.title("Training Accuracy Curve (batch_size={}, lr={})".format(
+        train_loader.batch_size, lr))
+    plt.plot(range(n_epochs), train_accuracies, label="Train")
+    plt.plot(range(n_epochs), validation_accuracies, label="Validation")
+    plt.xlabel("Iterations")
+    plt.ylabel("Training Accuracy")
+    plt.legend(loc='best')
+    plt.show()
+
+
 
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
-    data_manager = DataManager(batch_size=64)
-    model = LogLinear(16271)
-    train_model(model, data_manager, 10, 0.01, 0.0001)
-
-    return
+    data_manager = DataManager(ONEHOT_AVERAGE, batch_size=BATCH_SIZE)
+    model = LogLinear(EMBEDDING_DIM)
+    train_model(model, data_manager, N_EPOCHS, LEARNING_RATE, WEIGHT_DECAY)
 
 
 def train_log_linear_with_w2v():
