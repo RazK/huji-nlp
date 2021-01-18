@@ -483,7 +483,7 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
         validation_losses.append(validation_loss)
         validation_accuracies.append(validation_accuracy)
 
-    test_loss, test_accuracy = evaluate(model,test_loader,criterion)
+    test_loss, test_accuracy = get_predictions_for_data(model,test_loader)
     print("Test set: Average loss: {:.4f}, Accuracy: {:.0f}%"
           .format(test_loss, test_accuracy))
 
