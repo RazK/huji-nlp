@@ -27,7 +27,6 @@ VAL = "val"
 TEST = "test"
 
 BATCH_SIZE = 64  # Instructed by the PDF, page 5
-EMBEDDING_DIM = 16271  # TODO: Shahaf: Why?
 N_EPOCHS = 10  # TODO: Shahaf: Why?
 LEARNING_RATE = 0.01  # Instructed by the PDF, page 5
 WEIGHT_DECAY = 0.0001  # Instructed by the PDF, page 5
@@ -113,7 +112,6 @@ def create_or_load_slim_w2v(words_list, cache_w2v=False):
         w2v_emb_dict = load_pickle(w2v_path)
     return w2v_emb_dict
 
-
 def get_w2v_average(sent, word_to_vec, embedding_dim):
     """
     This method gets a sentence and returns the average word embedding of the words consisting
@@ -123,8 +121,12 @@ def get_w2v_average(sent, word_to_vec, embedding_dim):
     :param embedding_dim: the dimension of the word embedding vectors
     :return The average embedding vector as numpy ndarray.
     """
-    return
 
+    size = len(word_to_vec)
+    sum_vector_embeddings = np.zeros(embedding_dim)
+    for word in sent.text:
+        sum_vector_embeddings += word_to_vec.get(word, np.zeros(embedding_dim))
+    return sum_vector_embeddings / len(sent.text)
 
 def get_one_hot(size, ind):
     """
@@ -162,7 +164,6 @@ def get_word_to_ind(words_list):
     """
     return {word: words_list.index(word) for word in words_list}
 
-
 def sentence_to_embedding(sent, word_to_vec, seq_len, embedding_dim=300):
     """
     this method gets a sentence and a word to vector mapping, and returns a list containing the
@@ -173,8 +174,12 @@ def sentence_to_embedding(sent, word_to_vec, seq_len, embedding_dim=300):
     :param embedding_dim: the dimension of the w2v embedding
     :return: numpy ndarray of shape (seq_len, embedding_dim) with the representation of the sentence
     """
-    return
-
+    word_embedding_lst = []
+    for word in sent.text:
+        word_embedding_lst.append(word_to_vec.get(word, np.zeros(embedding_dim)))
+    if len(word_embedding_lst) >= seq_len:
+        return np.array(word_embedding_lst)[:seq_len]
+    return np.concatenate((np.array(word_embedding_lst), np.zeros((seq_len-len(word_embedding_lst), embedding_dim))))
 
 class OnlineDataset(Dataset):
     """
@@ -286,14 +291,22 @@ class LSTM(nn.Module):
     """
     An LSTM for sentiment analysis with architecture as described in the exercise description.
     """
+
     def __init__(self, embedding_dim, hidden_dim, n_layers, dropout):
-        return
+        super(LSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.dropout = dropout
+        self.batch_size = 64
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, n_layers, batch_first=True, bidirectional=True, dropout=dropout)
+        self.hidden2sent = nn.Linear(hidden_dim * 2, 1)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, text):
-        return
+        lstm_out, _ = self.lstm(text)
+        return self.hidden2sent(lstm_out[:, -1, :])
 
     def predict(self, text):
-        return
+        return self.sigmoid(self.forward(text))
 
 
 class LogLinear(nn.Module):
@@ -416,7 +429,25 @@ def get_predictions_for_data(model, data_iter):
     :param data_iter: torch iterator as given by the DataManager
     :return:
     """
-    return
+    model.eval()
+    num_full_batches = int(len(data_iter.dataset) /
+                           data_iter.batch_size)
+    limit = num_full_batches * data_iter.batch_size
+
+    test_correct = 0
+    with torch.no_grad():
+        for batch_idx, (inputs, labels) in islice(enumerate(data_iter),
+                                                  num_full_batches):
+            actual = labels.reshape(data_iter.batch_size, 1).type(
+                torch.FloatTensor)
+            outputs = model(inputs.type(torch.FloatTensor))
+            predictions = model.predict(inputs.type(torch.FloatTensor))
+            test_correct += binary_accuracy(predictions, actual) * len(actual)
+
+    print(
+        '\nTest set: Accuracy: {}/{} ({:.0f}%)\n'.format(
+            100. * test_correct / limit))
+    return test_correct / limit
 
 
 def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
@@ -475,33 +506,32 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     plt.legend(loc='best')
     plt.show()
 
-
-
 def train_log_linear_with_one_hot():
     """
     Here comes your code for training and evaluation of the log linear model with one hot representation.
     """
     data_manager = DataManager(ONEHOT_AVERAGE, batch_size=BATCH_SIZE)
-    model = LogLinear(EMBEDDING_DIM)
+    model = LogLinear(data_manager.get_input_shape()[0])
     train_model(model, data_manager, N_EPOCHS, LEARNING_RATE, WEIGHT_DECAY)
-
 
 def train_log_linear_with_w2v():
     """
     Here comes your code for training and evaluation of the log linear model with word embeddings
     representation.
     """
-    return
-
+    data_manager = DataManager(W2V_AVERAGE, batch_size=BATCH_SIZE, embedding_dim=300)
+    model = LogLinear(data_manager.get_input_shape()[0])
+    train_model(model, data_manager, N_EPOCHS, LEARNING_RATE, WEIGHT_DECAY)
 
 def train_lstm_with_w2v():
     """
     Here comes your code for training and evaluation of the LSTM model.
     """
-    return
-
+    data_manager = DataManager(W2V_SEQUENCE, batch_size=BATCH_SIZE, embedding_dim=300)
+    model = LSTM(data_manager.get_input_shape()[1], 100, 1, 0.5)
+    train_model(model, data_manager, 4, 0.001, 0.0001)
 
 if __name__ == '__main__':
-    train_log_linear_with_one_hot()
-    # train_log_linear_with_w2v()
-    # train_lstm_with_w2v()
+    # train_log_linear_with_one_hot()
+    #train_log_linear_with_w2v()
+    train_lstm_with_w2v()
