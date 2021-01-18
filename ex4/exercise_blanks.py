@@ -1,4 +1,5 @@
 from itertools import islice
+from data_loader import get_negated_polarity_examples, get_rare_words_examples
 
 import torch
 import torch.nn as nn
@@ -440,14 +441,10 @@ def get_predictions_for_data(model, data_iter):
                                                   num_full_batches):
             actual = labels.reshape(data_iter.batch_size, 1).type(
                 torch.FloatTensor)
-            outputs = model(inputs.type(torch.FloatTensor))
             predictions = model.predict(inputs.type(torch.FloatTensor))
             test_correct += binary_accuracy(predictions, actual) * len(actual)
 
-    print(
-        '\nTest set: Accuracy: {}/{} ({:.0f}%)\n'.format(
-            100. * test_correct / limit))
-    return test_correct / limit
+    return 100 * test_correct / limit
 
 
 def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
@@ -460,6 +457,7 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     :param lr: learning rate to be used for optimization
     :param weight_decay: parameter for l2 regularization
     """
+
     train_loader = data_manager.get_torch_iterator(TRAIN)
     validation_loader = data_manager.get_torch_iterator(VAL)
     test_loader = data_manager.get_torch_iterator(TEST)
@@ -483,9 +481,43 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
         validation_losses.append(validation_loss)
         validation_accuracies.append(validation_accuracy)
 
-    test_loss, test_accuracy = get_predictions_for_data(model,test_loader)
-    print("Test set: Average loss: {:.4f}, Accuracy: {:.0f}%"
-          .format(test_loss, test_accuracy))
+    test_accuracy = get_predictions_for_data(model,test_loader)
+    print("Test set: Accuracy: {:.0f}%"
+          .format(test_accuracy))
+
+    test_sentences = data_manager.sentences[TEST]
+    test_labels = data_manager.get_labels(TEST)
+    negated_indexes = get_negated_polarity_examples(test_sentences)
+    rare_words_indexes = get_rare_words_examples(test_sentences, data_manager.sentiment_dataset)
+
+
+    #all_word_vectors = []
+    #for batch in list(data_manager.get_torch_iterator(TEST)):
+    #    for vector in batch[0]:
+    #        all_word_vectors.append(vector)
+    #negated_inputs = [all_word_vectors[i].float() for i in negated_indexes]
+    #rare_words_inputs = [all_word_vectors[i].float() for i in rare_words_indexes]
+
+    #relevant_labels = [test_labels[i] for i in negated_indexes]
+
+    #negated_data = torch.stack(negated_inputs)
+    #rare_words_data = torch.stack(rare_words_inputs)
+
+    #labels = torch.stack(relevant_labels)
+    #negated_dataset = torch.utils.data.TensorDataset(negated_data, np.array(relevant_labels))
+    #rare_words_dataset = torch.utils.data.TensorDataset(rare_words_data, np.array(relevant_labels))
+
+    #negated_test_loader = torch.utils.data.DataLoader(negated_dataset)
+    #rare_words_test_loader = torch.utils.data.DataLoader(rare_words_dataset)
+
+    #negated_test_accuracy = get_predictions_for_data(model,negated_test_loader)
+    #rare_words_test_accuracy = get_predictions_for_data(model,rare_words_test_loader)
+
+    #print("Negated test set: Accuracy: {:.0f}%"
+    #      .format(negated_test_accuracy))
+
+    #print("Rare words test set: Accuracy: {:.0f}%"
+    #      .format(rare_words_test_accuracy))
 
 
     plt.title("Training Loss Curve (batch_size={}, lr={})".format(
@@ -529,9 +561,9 @@ def train_lstm_with_w2v():
     """
     data_manager = DataManager(W2V_SEQUENCE, batch_size=BATCH_SIZE, embedding_dim=300)
     model = LSTM(data_manager.get_input_shape()[1], 100, 1, 0.5)
-    train_model(model, data_manager, 4, 0.001, 0.0001)
+    train_model(model, data_manager, 1, 0.001, 0.0001)
 
 if __name__ == '__main__':
-    # train_log_linear_with_one_hot()
+    #train_log_linear_with_one_hot()
     #train_log_linear_with_w2v()
     train_lstm_with_w2v()
