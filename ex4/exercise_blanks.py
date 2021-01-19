@@ -457,7 +457,6 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     :param lr: learning rate to be used for optimization
     :param weight_decay: parameter for l2 regularization
     """
-
     train_loader = data_manager.get_torch_iterator(TRAIN)
     validation_loader = data_manager.get_torch_iterator(VAL)
     test_loader = data_manager.get_torch_iterator(TEST)
@@ -490,35 +489,36 @@ def train_model(model, data_manager, n_epochs, lr, weight_decay=0.):
     negated_indexes = get_negated_polarity_examples(test_sentences)
     rare_words_indexes = get_rare_words_examples(test_sentences, data_manager.sentiment_dataset)
 
+    all_word_vectors = []
+    for batch in list(data_manager.get_torch_iterator(TEST)):
+        for vector in batch[0]:
+            all_word_vectors.append(vector)
+    negated_inputs = [all_word_vectors[i].float() for i in negated_indexes]
+    rare_words_inputs = [all_word_vectors[i].float() for i in rare_words_indexes]
 
-    #all_word_vectors = []
-    #for batch in list(data_manager.get_torch_iterator(TEST)):
-    #    for vector in batch[0]:
-    #        all_word_vectors.append(vector)
-    #negated_inputs = [all_word_vectors[i].float() for i in negated_indexes]
-    #rare_words_inputs = [all_word_vectors[i].float() for i in rare_words_indexes]
+    negated_labels = [torch.tensor(test_labels[i]) for i in negated_indexes]
+    rare_words_labels = [torch.tensor(test_labels[i]) for i in rare_words_indexes]
 
-    #relevant_labels = [test_labels[i] for i in negated_indexes]
 
-    #negated_data = torch.stack(negated_inputs)
-    #rare_words_data = torch.stack(rare_words_inputs)
+    negated_data = torch.stack(negated_inputs)
+    rare_words_data = torch.stack(rare_words_inputs)
+    negated_labels = torch.stack(negated_labels)
+    rare_words_labels = torch.stack(rare_words_labels)
 
-    #labels = torch.stack(relevant_labels)
-    #negated_dataset = torch.utils.data.TensorDataset(negated_data, np.array(relevant_labels))
-    #rare_words_dataset = torch.utils.data.TensorDataset(rare_words_data, np.array(relevant_labels))
+    negated_dataset = torch.utils.data.TensorDataset(negated_data, negated_labels)
+    rare_words_dataset = torch.utils.data.TensorDataset(rare_words_data, rare_words_labels)
 
-    #negated_test_loader = torch.utils.data.DataLoader(negated_dataset)
-    #rare_words_test_loader = torch.utils.data.DataLoader(rare_words_dataset)
+    negated_test_loader = torch.utils.data.DataLoader(negated_dataset)
+    rare_words_test_loader = torch.utils.data.DataLoader(rare_words_dataset)
 
-    #negated_test_accuracy = get_predictions_for_data(model,negated_test_loader)
-    #rare_words_test_accuracy = get_predictions_for_data(model,rare_words_test_loader)
+    negated_test_accuracy = get_predictions_for_data(model,negated_test_loader)
+    rare_words_test_accuracy = get_predictions_for_data(model,rare_words_test_loader)
 
-    #print("Negated test set: Accuracy: {:.0f}%"
-    #      .format(negated_test_accuracy))
+    print("Negated test set: Accuracy: {:.0f}%"
+          .format(negated_test_accuracy))
 
-    #print("Rare words test set: Accuracy: {:.0f}%"
-    #      .format(rare_words_test_accuracy))
-
+    print("Rare words test set: Accuracy: {:.0f}%"
+          .format(rare_words_test_accuracy))
 
     plt.title("Training Loss Curve (batch_size={}, lr={})".format(
         train_loader.batch_size, lr))
@@ -564,6 +564,6 @@ def train_lstm_with_w2v():
     train_model(model, data_manager, 1, 0.001, 0.0001)
 
 if __name__ == '__main__':
-    #train_log_linear_with_one_hot()
+    train_log_linear_with_one_hot()
     #train_log_linear_with_w2v()
-    train_lstm_with_w2v()
+    #train_lstm_with_w2v()
