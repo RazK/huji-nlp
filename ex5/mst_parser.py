@@ -95,17 +95,37 @@ def get_feature_function(sentence: DependencyGraph) -> Counter:
     return (word_bigrams | pos_bigrams)
 
 
-def mst_to_feature_function(mst):
+def mst_to_feature_function(mst, sentence):
     """
     Convert an MST to a feature function.
-    :param mst: dict {v : WeightedArc(head=u, tail=v, weight=score}
+    :param mst: dict {v : WeightedArc(u_idx, v_idx, weight=score}
+    :param sentence: DependencyGraph
     :return: Counter {(u, v) : score}
     """
     features = Counter()
+    nodes = sentence.nodes
     for arc in mst.values():
-        features[(arc.head, arc.tail)] = arc.weight
+        u_idx, v_idx = arc.head, arc.tail
+        if u_idx:
+            features[(nodes[u_idx]['word'], nodes[v_idx]['word'])] = 1
+            features[(nodes[u_idx]['tag'], nodes[v_idx]['tag'])] = 1
+        else:
+            # Handle ROOT node
+            features[('ROOT', nodes[v_idx]['word'])] = 1
+            features[('ROOT', nodes[v_idx]['tag'])] = 1
     return features
 
+
+def get_word_and_tag(sentence, index):
+    """
+    Return the word and tag of the node at the given index in the sentence
+    :param sentence: DependencyGraph
+    :param index: node index in the sentence
+    :return: sentence.nodes[index]['word'], sentence.nodes[index]['tag']
+    """
+    if index == 0:
+        return 'ROOT', 'ROOT'
+    return sentence.nodes[index]['word'], sentence.nodes[index]['tag']
 
 def score(sentence, sentence_feature_function, weights):
     """
@@ -122,8 +142,10 @@ def score(sentence, sentence_feature_function, weights):
     for node in nodes.values():
         u_idx, v_idx = node["head"], node["address"]
         if u_idx:
-            word_arc = Arc(nodes[u_idx]["word"], nodes[v_idx]["word"])
-            tag_arc = Arc(nodes[u_idx]["tag"], nodes[v_idx]["tag"])
+            u_word, u_tag = get_word_and_tag(sentence, u_idx)
+            v_word, v_tag = get_word_and_tag(sentence, v_idx)
+            word_arc = Arc(u_word, v_word)
+            tag_arc = Arc(u_tag, v_tag)
             score = 0
             for arc in [word_arc, tag_arc]:
                 score += sentence_feature_function[arc] * weights[arc]
@@ -185,7 +207,7 @@ def averaged_perceptron(sentences, N_iterations=2, learning_rate=1.0):
                 weights_update[k] *= learning_rate
 
             # MST uses minimum, so we negate the weight update
-            weights -= weights_update
+            weights += weights_update
     # Normalize and return weights
     for k in weights.keys():
         weights[k] /= (len(sentences) * N_iterations)
