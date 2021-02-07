@@ -107,32 +107,40 @@ def mst_to_feature_function(mst):
     return features
 
 
-def score(weights, feature_function):
+def score(sentence, sentence_feature_function, weights):
     """
-    Calculate a score graph for the given tree with the given arc weights
-    and feature functions.
+    Calculate a score graph for the given sentence with the given arc weights
+    and feature function.
+    :param sentence: DependencyGraph
+    :param sentence_feature_function: Counter {(u, v) : f(u,v)}
     :param weights: dict {(u, v) : weight}
-    :param feature_function: Counter {(u, v) : f(u,v)}
-    :return: List [(head, tail, score)] where score is calculated by
-    score = f(head, tail) * weights[(head, tail)]
+    :return: List [(u_idx, v_idx, score)] where score is calculated by
+    score = f(u, v) * weights[(u, v)]
     """
     arcs = []
-    for arc in feature_function.keys():
-        arcs.append(WeightedArc(head=arc[0],
-                                tail=arc[1],
-                                weight=feature_function[arc] * weights[arc]))
+    nodes = sentence.nodes
+    for node in nodes.values():
+        u_idx, v_idx = node["head"], node["address"]
+        if u_idx:
+            word_arc = Arc(nodes[u_idx]["word"], nodes[v_idx]["word"])
+            tag_arc = Arc(nodes[u_idx]["tag"], nodes[v_idx]["tag"])
+            score = 0
+            for arc in [word_arc, tag_arc]:
+                score += sentence_feature_function[arc] * weights[arc]
+            arcs.append(WeightedArc(head=u_idx, tail=v_idx, weight=score))
     return arcs
 
 
-def get_mst(weights, sentence_feature_function):
+def get_sentence_mst(sentence, sentence_feature_function, weights):
     """
     Given a sentence and a weights vector, predict an MST for that sentence.
     :param sentence: DependencyGraph
+    :param sentence_feature_function: Counter {(u, v) : f(u, v)}
     :param weights: Counter {(u, v) : weight}
-    :return: MST {tail : WeightedArc(head, tail, weight)}
+    :return: MST {tail : WeightedArc(head_idx, tail_idx, weight)}
     """
     return min_spanning_arborescence_nx(
-        score(weights, sentence_feature_function))
+        score(sentence, sentence_feature_function, weights))
 
 
 def mst_index_arcs(mst, sentence):
@@ -144,7 +152,7 @@ def mst_index_arcs(mst, sentence):
     :return: arcs = set {Arc(head_idx, tail_idx)}
     """
     node2index = {frozenset(node): index for index, node in
-               sentence.nodes.items()}
+                  sentence.nodes.items()}
     index_arcs = set()
     for arc in mst.values():
         head = frozenset(arc['head'])
@@ -153,6 +161,7 @@ def mst_index_arcs(mst, sentence):
         tail_idx = node2index[tail]
         index_arcs.add(Arc(head_idx, tail_idx))
     return index_arcs
+
 
 def averaged_perceptron(sentences, N_iterations=2, learning_rate=1.0):
     logging.debug('Running Averaged Perceptron...')
@@ -165,16 +174,18 @@ def averaged_perceptron(sentences, N_iterations=2, learning_rate=1.0):
                 len(sentences) * r + i, N))
             logging.debug("Sentence: {}".format(sentence))
             sentence_feature_function = get_feature_function(sentence)
-            mst = get_mst(weights, sentence_feature_function)
+            mst = get_sentence_mst(sentence, sentence_feature_function,
+                                   weights)
             logging.debug("MST: {}".format(mst))
-            index_arcs = mst_index_arcs(mst, sentence)
             mst_feature_function = mst_to_feature_function(mst)
             logging.debug(
                 "MST Feature Function: {}".format(mst_feature_function))
             weights_update = (sentence_feature_function - mst_feature_function)
             for k in weights_update.keys():
                 weights_update[k] *= learning_rate
-            weights += weights_update
+
+            # MST uses minimum, so we negate the weight update
+            weights -= weights_update
     # Normalize and return weights
     for k in weights.keys():
         weights[k] /= (len(sentences) * N_iterations)
@@ -185,16 +196,17 @@ def ground_truth(sentence):
     """
     Extract the ground truth MST from the given sentence
     :param sentence: DependencyGraph
-    :return: Sentence Arcs = set {Arc(head=u_idx, tail=v_idx})
+    :return: Sentence Index Arcs = set {Arc(head=u_idx, tail=v_idx)})
     """
-    return set(Arc(node["head"], node["address"]) for node in
-               sentence.nodes.values() if node["head"])
+    index_arc = lambda node: Arc(node["head"], node["address"])
+    return set(index_arc(node) for node in sentence.nodes.values()
+               if node["head"])
 
 
 def evaluate(dataset, weights):
     for sentence in dataset:
-        feature_function = get_feature_function(sentence)
-        mst = get_mst(weights, feature_function)
+        sentence_feature_function = get_feature_function(sentence)
+        mst = get_sentence_mst(sentence, sentence_feature_function, weights)
         arcs = mst_index_arcs(mst)
         ground_truth = ground_truth(sentence)
         # compare arcs to ground_truth
@@ -205,8 +217,8 @@ if __name__ == "__main__":
     logging.info('Loading dataset...')
     dl = DataLoader()
     logging.info('Train set: {} sentences'.format(len(dl.get_train_set())))
-    logging.info('Validation set: {} sentences'.format(
-        len(dl.get_validation_set())))
+    logging.info(
+        'Validation set: {} sentences'.format(len(dl.get_validation_set())))
     logging.info('Test set: {} sentences'.format(len(dl.get_test_set())))
     logging.info('Total: {} sentences'.format(len(dl.sentences)))
 
